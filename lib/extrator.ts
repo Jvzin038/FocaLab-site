@@ -26,6 +26,20 @@ global.DOMMatrix = global.DOMMatrix || class {
         this.m41 = 0; this.m42 = 0;
     }
 };
+// O pdf-parse as vezes tenta usar atob para decodificar partes do PDF e falha se tiver espaços.
+if (typeof global.atob === 'undefined') {
+    global.atob = (str) => Buffer.from(str, 'base64').toString('binary');
+} else {
+    const originalAtob = global.atob;
+    global.atob = (str) => {
+        // Limpa a string antes de tentar decodificar
+        try {
+            return originalAtob(str.replace(/\s/g, ''));
+        } catch (e) {
+            return ""; // Retorna vazio se falhar, em vez de erro fatal
+        }
+    };
+}
 
 export async function extrairTextoDoBuffer(buffer: Buffer, mimeType: string): Promise<string> {
   try {
