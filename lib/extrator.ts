@@ -1,20 +1,8 @@
 import { PDFParse } from 'pdf-parse';
 
-// --- O PULO DO GATO (CORREÇÃO DO ERRO DOMMatrix) ---
-// O Node.js não tem DOMMatrix nativo, então criamos um falso para o pdf-parse não travar.
+// --- CORREÇÃO 1: MOCK DO DOMMatrix (Para não dar erro no Vercel) ---
 // @ts-ignore
-if (typeof Promise.withResolvers === "undefined") {
-    // Polyfill opcional para versões antigas do Node, por segurança
-    // @ts-ignore
-    Promise.withResolvers = function () {
-        let resolve, reject;
-        const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
-        return { promise, resolve, reject };
-    };
-}
-
-// @ts-ignore
-global.DOMMatrix = global.DOMMatrix || class {
+(global as any).DOMMatrix = (global as any).DOMMatrix || class {
     m11: number;
     m12: number;
     m21: number;
@@ -26,30 +14,42 @@ global.DOMMatrix = global.DOMMatrix || class {
         this.m41 = 0; this.m42 = 0;
     }
 };
-// O pdf-parse as vezes tenta usar atob para decodificar partes do PDF e falha se tiver espaços.
-if (typeof global.atob === 'undefined') {
-    global.atob = (str) => Buffer.from(str, 'base64').toString('binary');
-} else {
-    const originalAtob = global.atob;
-    global.atob = (str) => {
-        // Limpa a string antes de tentar decodificar
-        try {
-            return originalAtob(str.replace(/\s/g, ''));
-        } catch (e) {
-            return ""; // Retorna vazio se falhar, em vez de erro fatal
-        }
-    };
-}
+
+// --- CORREÇÃO 2: CORREÇÃO DO ATOB (Para não dar erro de "Pattern") ---
+// O pdf-parse usa atob internamente. Vamos blindar essa função para limpar sujeira antes de ler.
+const originalAtob = global.atob;
+global.atob = function (str) {
+    try {
+        // Remove qualquer coisa que não seja Base64 (espaços, enters, tabs)
+        const cleanStr = String(str).replace(/[\t\n\f\r ]+/g, "");
+        if (originalAtob) return originalAtob(cleanStr);
+        return Buffer.from(cleanStr, 'base64').toString('binary');
+    } catch (e) {
+        return "";
+    }
+};
 
 export async function extrairTextoDoBuffer(buffer: Buffer, mimeType: string): Promise<string> {
   try {
-    // 1. Se for PDF, usa o pdf-parse
+    // 1. Se for PDF
     if (mimeType === 'application/pdf') {
-      const parser = new PDFParse({ data: buffer });
-      const data = await parser.getText();
-      await parser.destroy();
-      // Limpa quebras de linha estranhas que PDFs costumam ter
-      return data.text.replace(/\n\n+/g, '\n').substring(0, 25000); 
+      try {
+        const parser = new PDFParse({ data: buffer });
+        const result = await parser.getText();
+        await parser.destroy();
+        
+        if (!result || !result.text || result.text.trim().length === 0) {
+           // Se não leu nada, retorna vazio sem quebrar
+           return ""; 
+        }
+
+        // Limpa excesso de quebras de linha
+        return result.text.replace(/\n\n+/g, '\n').substring(0, 35000);
+        
+      } catch (pdfError) {
+        console.error("Erro interno do pdf-parse:", pdfError);
+        return ""; 
+      }
     }
     
     // 2. Se for texto puro
@@ -57,10 +57,9 @@ export async function extrairTextoDoBuffer(buffer: Buffer, mimeType: string): Pr
       return buffer.toString('utf-8');
     }
 
-    // 3. Se for imagem ou áudio, por enquanto retornamos vazio (trataremos depois)
     return "";
   } catch (error) {
-    console.error("Erro ao ler PDF:", error);
-    throw new Error("Não foi possível ler o texto do arquivo.");
+    console.error("Erro geral na extração:", error);
+    return ""; 
   }
 }

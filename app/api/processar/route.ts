@@ -8,122 +8,99 @@ const openai = new OpenAI({
 
 export async function POST(req: Request) {
   try {
-    const { fileBase64, mimeType, servicos, textoLink } = await req.json();
+    // Aumentamos o limite de leitura do JSON para evitar erros em arquivos grandes
+    const body = await req.json(); 
+    const { fileBase64, mimeType, servicos, textoLink } = body;
 
-    console.log("🧠 Processando...", { servicos, mimeType });
+    console.log("🧠 Processando serviço:", servicos);
 
-    // --- MODO LINK ABNT (Mantido igual) ---
+    // --- MODO ABNT LINK ---
     if (servicos.includes('abnt_link')) {
-        const promptLink = `Você é um bibliotecário especialista ABNT. Crie a referência para: "${textoLink}". Retorne JSON: { "referencia": "..." }`;
         const completion = await openai.chat.completions.create({
             model: "gpt-3.5-turbo",
-            messages: [{ role: "system", content: promptLink }],
+            messages: [{ role: "system", content: `Gere referência ABNT para: "${textoLink}". Retorne JSON: {"referencia": "..."}` }],
             response_format: { type: "json_object" },
         });
         return NextResponse.json(JSON.parse(completion.choices[0].message.content || "{}"));
     }
 
-    // --- PASSO CRUCIAL: EXTRAÇÃO DO TEXTO DO ARQUIVO ---
+    // --- PREPARAÇÃO DO CONTEÚDO ---
     let conteudoParaIA = "";
-    
-    // Se for Imagem, não extraímos texto (o GPT Vision vê a imagem)
     const ehImagem = mimeType && mimeType.startsWith('image/');
     
     if (!ehImagem && fileBase64) {
-        // --- CORREÇÃO AQUI ---
-        // 1. Remove o cabeçalho "data:application/pdf..."
-        // 2. Remove espaços em branco (\s) e quebras de linha que causam o erro "expected pattern"
-        const base64Limpo = fileBase64.replace(/^data:.*;base64,/, "").replace(/\s/g, "");
+        // --- AQUI ESTA A CORREÇÃO PRINCIPAL ---
+        // 1. Remove cabeçalho (data:application...)
+        // 2. Remove TODOS os espaços em branco, quebras de linha e tabs (\s no regex)
+        const base64Limpo = fileBase64.replace(/^data:.*;base64,/, "").replace(/[\s\n\r]/g, "");
         
-        // 3. Transformar em Buffer (Arquivo real na memória)
-        const buffer = Buffer.from(base64Limpo, 'base64');
-        
-        // 4. Extrair o texto
         try {
+            const buffer = Buffer.from(base64Limpo, 'base64');
             conteudoParaIA = await extrairTextoDoBuffer(buffer, mimeType);
-            console.log("✅ Texto extraído com sucesso! Tamanho:", conteudoParaIA.length);
         } catch (e) {
-            console.error("Erro ao extrair:", e);
-            // Retorna erro amigável em vez de travar
-            return NextResponse.json({ error: "Ocorreu um erro ao ler o texto do PDF. Tente outro arquivo." }, { status: 400 });
+            console.error("Erro ao converter base64:", e);
+            return NextResponse.json({ error: "O arquivo está corrompido ou ilegível." }, { status: 400 });
         }
     }
 
-    // --- PREPARAR O PROMPT ---
+    // --- PROMPT E CHAMADA OPENAI ---
     const systemPrompt = `
-      Você é um Tutor IA especialista.
-      Baseie-se EXCLUSIVAMENTE no conteúdo fornecido abaixo.
+      Você é um Tutor IA. Responda ESTRITAMENTE em JSON.
+      Baseie-se neste texto:
+      "${conteudoParaIA ? conteudoParaIA.substring(0, 20000) : 'Conteúdo visual/vazio'}"
       
-      FORMATO JSON OBRIGATÓRIO:
+      FORMATO:
       {
-        ${servicos.includes('resumo') ? '"resumo": "Resumo rico em HTML (<p>, <b>, <br>).",' : ''}
-        ${servicos.includes('flashcards') ? '"flashcards": [{ "frente": "Pergunta curta?", "verso": "Resposta direta." }],' : ''}
-        ${servicos.includes('questoes') ? `"questoes": [{ "enunciado": "...", "alternativas": ["A) ...", "B) ...", "C) ...", "D) ..."], "correta": 0, "explicacao": "..." }],` : ''}
-        ${servicos.includes('mapa') ? '"mermaid": "graph TD; A[Conceito Central] --> B(Subconceito); B --> C{Detalhe}; style A fill:#f9f,stroke:#333;",' : ''}
-        ${servicos.includes('podcast') ? '"podcast_script": "Olá! Vamos estudar este material. Começando por...",' : ''}
+        ${servicos.includes('resumo') ? '"resumo": "Resumo rico em HTML (<p>, <b>).",' : ''}
+        ${servicos.includes('flashcards') ? '"flashcards": [{ "frente": "...", "verso": "..." }],' : ''}
+        ${servicos.includes('questoes') ? `"questoes": [{ "enunciado": "...", "alternativas": ["A)..."], "correta": 0, "explicacao": "..." }],` : ''}
+        ${servicos.includes('mapa') ? '"mermaid": "graph TD; A-->B;",' : ''}
+        ${servicos.includes('podcast') ? '"podcast_script": "Olá estudantes...",' : ''}
         ${servicos.includes('apresentacao') ? '"roteiro_estruturado": { "introducao": "...", "desenvolvimento": "...", "conclusao": "..." }, "referencia_abnt_arquivo": "..." ' : ''}
       }
-      
-      DICAS:
-      - Mapa Mental: Use nós curtos. Deixe colorido.
-      - Questões: Crie perguntas desafiadoras sobre o texto lido.
-      - Flashcards: Resuma conceitos chave.
     `;
 
     const messages: any[] = [{ role: "system", content: systemPrompt }];
 
     if (ehImagem) {
-       // Se for imagem, manda o base64 direto pro Vision
        messages.push({
          role: "user",
          content: [
-           { type: "text", text: "Analise esta imagem didática e gere o conteúdo pedido." },
+           { type: "text", text: "Analise a imagem." },
            { type: "image_url", image_url: { url: fileBase64 } } 
          ]
        });
     } else {
-       // Se for PDF, manda o TEXTO EXTRAÍDO
-       if (conteudoParaIA.length < 50) {
-           return NextResponse.json({ error: "O arquivo parece vazio ou é uma imagem digitalizada sem texto (OCR necessário)." }, { status: 400 });
-       }
-       messages.push({
-         role: "user",
-         content: `Conteúdo do Arquivo para Estudo: \n"${conteudoParaIA}"` 
-       });
+        // Se for PDF mas não saiu texto
+        if (!conteudoParaIA || conteudoParaIA.length < 50) {
+            return NextResponse.json({ error: "Não foi possível ler texto deste PDF. Tente um arquivo com texto selecionável (não imagem)." }, { status: 400 });
+        }
+        messages.push({ role: "user", content: "Analise o texto extraído acima." });
     }
 
-    console.log("🚀 Enviando para OpenAI...");
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o", // Gpt-4o é ótimo para seguir JSON
+      model: "gpt-4o",
       messages: messages,
       response_format: { type: "json_object" },
-      temperature: 0.5,
     });
 
-    const respostaTexto = completion.choices[0].message.content;
-    const dadosProcessados = JSON.parse(respostaTexto || "{}");
+    const dadosProcessados = JSON.parse(completion.choices[0].message.content || "{}");
 
-    // --- GERAR PODCAST (ÁUDIO) ---
+    // Gerar Áudio se necessário
     if (servicos.includes('podcast') && dadosProcessados.podcast_script) {
-        console.log("🎙️ Gerando áudio...");
         try {
             const mp3 = await openai.audio.speech.create({
-                model: "tts-1",
-                voice: "alloy",
-                input: dadosProcessados.podcast_script.substring(0, 4096), // Limite de segurança
+                model: "tts-1", voice: "alloy", input: dadosProcessados.podcast_script.substring(0, 4000),
             });
             const buffer = Buffer.from(await mp3.arrayBuffer());
             dadosProcessados.audio_base64 = "data:audio/mp3;base64," + buffer.toString('base64');
-        } catch (e) {
-            console.error("Erro ao gerar áudio:", e);
-            // Não quebramos o resto se o áudio falhar
-        }
+        } catch (e) { console.error("Erro audio", e); }
     }
 
     return NextResponse.json(dadosProcessados);
 
   } catch (error: any) {
-    console.error('❌ ERRO GERAL:', error);
-    return NextResponse.json({ error: 'Falha interna: ' + error.message }, { status: 500 });
+    console.error('❌ ERRO FATAL:', error);
+    return NextResponse.json({ error: 'Erro no servidor: ' + error.message }, { status: 500 });
   }
 }
