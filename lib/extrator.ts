@@ -1,53 +1,48 @@
-import { PDFParse } from 'pdf-parse';
-
-// --- CORREÇÃO 1: MOCK DO DOMMatrix (Para não dar erro no Vercel) ---
 // @ts-ignore
-(global as any).DOMMatrix = (global as any).DOMMatrix || class {
-    m11: number;
-    m12: number;
-    m21: number;
-    m22: number;
-    m41: number;
-    m42: number;
-    constructor() {
-        this.m11 = 1; this.m12 = 0; this.m21 = 0; this.m22 = 1; 
-        this.m41 = 0; this.m42 = 0;
-    }
-};
+import pdf from 'pdf-parse';
 
-// --- CORREÇÃO 2: CORREÇÃO DO ATOB (Para não dar erro de "Pattern") ---
-// O pdf-parse usa atob internamente. Vamos blindar essa função para limpar sujeira antes de ler.
-const originalAtob = global.atob;
-global.atob = function (str) {
+// --- CORREÇÃO 1: BLINDAGEM DO ATOB ---
+// @ts-ignore
+global.atob = function(str: any) {
     try {
-        // Remove qualquer coisa que não seja Base64 (espaços, enters, tabs)
         const cleanStr = String(str).replace(/[\t\n\f\r ]+/g, "");
-        if (originalAtob) return originalAtob(cleanStr);
         return Buffer.from(cleanStr, 'base64').toString('binary');
     } catch (e) {
         return "";
     }
 };
 
+// --- CORREÇÃO 2: DOMMatrix FALSO (Corrigido para TypeScript) ---
+// @ts-ignore
+if (!global.DOMMatrix) {
+    // @ts-ignore
+    global.DOMMatrix = class {
+        // AQUI ESTAVA O ERRO: Precisamos declarar as variáveis antes
+        m11: number; m12: number; m21: number; m22: number;
+        m41: number; m42: number;
+
+        constructor() {
+            this.m11 = 1; this.m12 = 0; this.m21 = 0; this.m22 = 1; 
+            this.m41 = 0; this.m42 = 0;
+        }
+    };
+}
+
 export async function extrairTextoDoBuffer(buffer: Buffer, mimeType: string): Promise<string> {
   try {
     // 1. Se for PDF
     if (mimeType === 'application/pdf') {
       try {
-        const parser = new PDFParse({ data: buffer });
-        const result = await parser.getText();
-        await parser.destroy();
+        const data = await pdf(buffer);
         
-        if (!result || !result.text || result.text.trim().length === 0) {
-           // Se não leu nada, retorna vazio sem quebrar
+        if (!data || !data.text || data.text.trim().length === 0) {
            return ""; 
         }
 
-        // Limpa excesso de quebras de linha
-        return result.text.replace(/\n\n+/g, '\n').substring(0, 35000);
+        return data.text.replace(/\n\n+/g, '\n').substring(0, 40000);
         
       } catch (pdfError) {
-        console.error("Erro interno do pdf-parse:", pdfError);
+        console.error("Erro interno ao ler PDF:", pdfError);
         return ""; 
       }
     }
