@@ -31,6 +31,7 @@ export default function Dashboard() {
   const [menuAtivo, setMenuAtivo] = useState("inicio"); 
   const [menuPerfilAberto, setMenuPerfilAberto] = useState(false);
   const [historico, setHistorico] = useState<any[]>([]);
+  const [menuMobileAberto, setMenuMobileAberto] = useState(false);
 
   // --- ESTADOS DE PERFIL ---
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
@@ -1222,6 +1223,7 @@ export default function Dashboard() {
         {/* --- RODAPÉ FOI REMOVIDO DAQUI E ESTÁ NA PÁGINA INICIAL --- */}
       </main>
 
+{/* PLAYER DE PODCAST (Se estiver tocando) */}
       {podcastTocando && (
           <div className="fixed bottom-0 left-0 md:left-64 right-0 bg-slate-900 border-t border-slate-800 p-4 shadow-2xl z-50 animate-in slide-in-from-bottom-5">
               <button onClick={fecharPodcast} className="absolute -top-4 right-4 bg-red-600 hover:bg-red-700 text-white rounded-full h-8 w-8 flex items-center justify-center shadow-lg transition border-2 border-slate-900" title="Fechar Player">✖</button>
@@ -1232,10 +1234,34 @@ export default function Dashboard() {
               </div>
           </div>
       )}
+
+      {/* --- MENU MOBILE (SOBREPOSIÇÃO) --- */}
+      {menuMobileAberto && (
+        <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-sm p-6 animate-in slide-in-from-left-10 md:hidden flex flex-col">
+           <div className="flex justify-between items-center mb-8">
+              <div className="flex items-center gap-2 text-xl font-bold"><span>🦭</span> Foca<span className="text-blue-500">Lab</span></div>
+              <button onClick={() => setMenuMobileAberto(false)} className="h-10 w-10 bg-slate-800 rounded-full text-white font-bold">✕</button>
+           </div>
+           
+           <nav className="flex-1 space-y-2 overflow-y-auto">
+              <BotaoMenu icone="🏠" texto="Visão Geral" ativo={menuAtivo === "inicio"} onClick={() => {setMenuAtivo("inicio"); setMenuMobileAberto(false);}} />
+              <BotaoMenu icone="🚀" texto="Novo Projeto" ativo={menuAtivo === "upload"} onClick={() => {setMenuAtivo("upload"); setFase("upload"); setArquivo(null); setMenuMobileAberto(false);}} />
+              <BotaoMenu icone="🗣️" texto="Roteiro & ABNT" ativo={menuAtivo === "apresentacao"} onClick={() => {setMenuAtivo("apresentacao"); setMenuMobileAberto(false);}} />
+              <BotaoMenu icone="🎧" texto="Podcasts" ativo={menuAtivo === "podcasts"} onClick={() => {setMenuAtivo("podcasts"); setMenuMobileAberto(false);}} />
+              <BotaoMenu icone="📂" texto="Meus Arquivos" ativo={menuAtivo === "arquivos"} onClick={() => {setMenuAtivo("arquivos"); setMenuMobileAberto(false);}} />
+              <BotaoMenu icone="🃏" texto="Flashcards" ativo={menuAtivo === "flashcards"} onClick={() => {setMenuAtivo("flashcards"); setMenuMobileAberto(false);}} />
+              <BotaoMenu icone="🧠" texto="Mapas Mentais" ativo={menuAtivo === "mapas"} onClick={() => {setMenuAtivo("mapas"); setMenuMobileAberto(false);}} />
+              <BotaoMenu icone="💬" texto="Tutor IA" ativo={menuAtivo === "tutor_ia"} onClick={() => {setMenuAtivo("tutor_ia"); setMenuMobileAberto(false);}} />
+              <BotaoMenu icone="📈" texto="Desempenho" ativo={menuAtivo === "desempenho"} onClick={() => {setMenuAtivo("desempenho"); setMenuMobileAberto(false);}} />
+              <div className="pt-4 border-t border-slate-800 mt-4">
+                  <BotaoMenu icone="⚙️" texto="Configurações" ativo={menuAtivo === "perfil"} onClick={() => {setMenuAtivo("perfil"); setMenuMobileAberto(false);}} />
+              </div>
+           </nav>
+        </div>
+      )}
+
     </div>
   );
-}
-
 // Componentes
 function BotaoMenu({ icone, texto, ativo, onClick }: any) { return <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition font-medium ${ativo ? "bg-blue-600/10 text-blue-400 border border-blue-600/20" : "text-slate-400 hover:bg-slate-800 hover:text-white"}`}><span>{icone}</span> {texto}</button>; }
 function CardStat({ icone, numero, texto, cor }: any) { 
@@ -1243,3 +1269,4 @@ function CardStat({ icone, numero, texto, cor }: any) {
     return <div className={`p-6 rounded-2xl border ${cores[cor] || cores.blue} flex items-center gap-4`}><div className="text-3xl">{icone}</div><div><div className="text-2xl font-bold text-white">{numero}</div><div className="text-xs opacity-80">{texto}</div></div></div>; 
 }
 function ServicoCard({ id, icon, titulo, desc, selecionado, onClick, disabled }: any) { return <div onClick={disabled ? undefined : onClick} className={`p-4 rounded-xl border-2 transition cursor-pointer flex items-center gap-4 ${disabled ? "opacity-50 cursor-not-allowed border-slate-800 bg-slate-900" : selecionado ? "border-blue-500 bg-blue-500/10" : "border-slate-800 bg-slate-900 hover:border-slate-600"}`}><div className="text-3xl">{icon}</div><div><h4 className={`font-bold ${selecionado ? "text-blue-400" : "text-white"}`}>{titulo}</h4><p className="text-xs text-slate-400">{desc}</p></div>{selecionado && <div className="ml-auto text-blue-500">✅</div>}</div>; }
+}
