@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { extrairTextoDoBuffer } from '@/lib/extrator';
+export const dynamic = 'force-dynamic';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY, 
