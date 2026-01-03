@@ -1202,15 +1202,39 @@ export default function Dashboard() {
       </aside>
 
       <main className="flex-1 p-8 md:ml-64 min-h-screen relative flex flex-col">
-        <header className="flex justify-between items-center mb-10">
-          
-          {/* --- PROTEÇÃO NO TÍTULO DASHBOARD --- */}
-          <div><h1 className="text-2xl font-bold" translate="no">Dashboard</h1><p className="text-slate-400 text-sm">Foco total, {usuario?.user_metadata?.display_name || "Mestre"}.</p></div>
-          
+        <header className="flex justify-between items-center mb-10 gap-4">
+          {/* --- NOVO BOTÃO (Só aparece no celular) --- */}
+          <button 
+            onClick={() => setMenuMobileAberto(true)}
+            className="md:hidden h-10 w-10 bg-slate-800 hover:bg-slate-700 rounded-xl flex items-center justify-center text-xl text-white shadow-lg border border-slate-700 transition"
+          >
+            ☰
+          </button>
+          {/* ------------------------------------------ */}
+
+          <div className="flex-1 overflow-hidden">
+             <h1 className="text-xl md:text-2xl font-bold truncate">Dashboard</h1>
+             <p className="text-slate-400 text-xs md:text-sm hidden md:block">
+               Foco total, {usuario?.user_metadata?.display_name || "Mestre"}.
+             </p>
+          </div>
+
           <div className="flex items-center gap-4 relative">
             <div className="relative">
-                <button onClick={() => setMenuPerfilAberto(!menuPerfilAberto)} className="h-10 w-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center font-bold text-white shadow-lg border-2 border-slate-900 cursor-pointer overflow-hidden">{fotoPreview ? <img src={fotoPreview} className="w-full h-full object-cover" /> : usuario?.email?.charAt(0).toUpperCase()}</button>
-                {menuPerfilAberto && <div className="absolute right-0 mt-2 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden z-50"><button onClick={sairDaConta} className="w-full text-left px-4 py-3 text-sm hover:bg-red-900/20 text-red-400 transition">Sair</button></div>}
+                <button 
+                  onClick={() => setMenuPerfilAberto(!menuPerfilAberto)} 
+                  className="h-10 w-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center font-bold text-white shadow-lg border-2 border-slate-900 cursor-pointer overflow-hidden"
+                >
+                  {fotoPreview ? <img src={fotoPreview} className="w-full h-full object-cover" /> : usuario?.email?.charAt(0).toUpperCase()}
+                </button>
+                
+                {menuPerfilAberto && (
+                  <div className="absolute right-0 mt-2 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden z-50">
+                    <button onClick={sairDaConta} className="w-full text-left px-4 py-3 text-sm hover:bg-red-900/20 text-red-400 transition">
+                      Sair
+                    </button>
+                  </div>
+                )}
             </div>
           </div>
         </header>
