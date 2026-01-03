@@ -1,5 +1,6 @@
+// --- MUDANÇA AQUI: Usamos 'require' para evitar erro de exportação no Vercel ---
 // @ts-ignore
-import pdf from 'pdf-parse';
+const pdf = require('pdf-parse');
 
 // --- CORREÇÃO 1: BLINDAGEM DO ATOB ---
 // @ts-ignore
@@ -17,7 +18,7 @@ global.atob = function(str: any) {
 if (!global.DOMMatrix) {
     // @ts-ignore
     global.DOMMatrix = class {
-        // AQUI ESTAVA O ERRO: Precisamos declarar as variáveis antes
+        // Declaração de variáveis para o TypeScript não reclamar
         m11: number; m12: number; m21: number; m22: number;
         m41: number; m42: number;
 
