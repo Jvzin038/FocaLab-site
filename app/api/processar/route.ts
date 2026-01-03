@@ -30,19 +30,22 @@ export async function POST(req: Request) {
     const ehImagem = mimeType && mimeType.startsWith('image/');
     
     if (!ehImagem && fileBase64) {
-        // 1. Limpar o cabeçalho do base64 (ex: "data:application/pdf;base64,...")
-        const base64Limpo = fileBase64.replace(/^data:.*;base64,/, "");
+        // --- CORREÇÃO AQUI ---
+        // 1. Remove o cabeçalho "data:application/pdf..."
+        // 2. Remove espaços em branco (\s) e quebras de linha que causam o erro "expected pattern"
+        const base64Limpo = fileBase64.replace(/^data:.*;base64,/, "").replace(/\s/g, "");
         
-        // 2. Transformar em Buffer (Arquivo real na memória)
+        // 3. Transformar em Buffer (Arquivo real na memória)
         const buffer = Buffer.from(base64Limpo, 'base64');
         
-        // 3. Extrair o texto usando nossa função
+        // 4. Extrair o texto
         try {
             conteudoParaIA = await extrairTextoDoBuffer(buffer, mimeType);
             console.log("✅ Texto extraído com sucesso! Tamanho:", conteudoParaIA.length);
         } catch (e) {
             console.error("Erro ao extrair:", e);
-            return NextResponse.json({ error: "Erro ao ler o arquivo. Certifique-se que o PDF contém texto selecionável." }, { status: 400 });
+            // Retorna erro amigável em vez de travar
+            return NextResponse.json({ error: "Ocorreu um erro ao ler o texto do PDF. Tente outro arquivo." }, { status: 400 });
         }
     }
 
