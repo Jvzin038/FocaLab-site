@@ -37,7 +37,7 @@ export async function POST(req: Request) {
         
         try {
             const buffer = Buffer.from(base64Limpo, 'base64');
-            conteudoParaIA = await extrairTextoDoBuffer(buffer, mimeType);
+            conteudoParaIA = await extrairTextoDoBuffer(buffer);
         } catch (e) {
             console.error("Erro ao converter base64:", e);
             return NextResponse.json({ error: "O arquivo está corrompido ou ilegível." }, { status: 400 });
