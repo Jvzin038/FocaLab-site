@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import mermaid from "mermaid";
 import PptxGenJS from "pptxgenjs"; // Exportação PPTX
 import jsPDF from "jspdf";         // Exportação PDF
+import MapaMentalViewer from '../components/MapaMentalViewer';
 
 // --- CONFIGURAÇÃO DO SUPABASE ---
 const supabase = createClient(
@@ -249,49 +250,69 @@ export default function Dashboard() {
     if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
   }, [chatMensagens, menuAtivo]);
 
-  // --- LÓGICA DO CHAT ---
+  // --- LÓGICA DO CHAT TUTOR IA (ATUALIZADA) ---
   const enviarMensagemChat = async () => {
     if (!chatInput.trim()) return;
+
+    // 1. Define o contexto: Tenta pegar o arquivo aberto agora ou o último salvo
+    const contextoAtual = arquivoLeitura?.resumo || historico[0]?.resumo || "O aluno está estudando tópicos gerais. Ajude-o com perguntas.";
+
+    // 2. Adiciona mensagem do usuário na tela imediatamente
     const msgUsuario = { role: "user", content: chatInput };
-    setChatMensagens(prev => [...prev, msgUsuario]);
-    setChatInput("");
-    setIsTyping(true);
+    const novasMensagens = [...chatMensagens, msgUsuario]; // Cria o histórico atualizado
+    setChatMensagens(novasMensagens);
+    setChatInput(""); // Limpa o campo
+    setIsTyping(true); // Mostra "Digitando..."
 
-    setTimeout(async () => {
-        const acertou = Math.random() > 0.4;
-        let respostaIA = "";
-        let topico = "Geral"; 
+    try {
+      // 3. Chama a API Real que criamos
+      const response = await fetch('/api/chat-tutor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          messages: novasMensagens, // Envia o histórico da conversa
+          contexto: contextoAtual   // Envia o resumo do PDF
+        }),
+      });
+      
+      const data = await response.json();
+      
+      // 4. Processa a resposta da IA
+      if (data.reply) {
+         setChatMensagens(prev => [...prev, { role: "assistant", content: data.reply }]);
+         
+         // Lógica simples para detectar se o aluno acertou (baseado em palavras-chave)
+         // Isso atualiza os gráficos de desempenho
+         const respostaLower = data.reply.toLowerCase();
+         const acertou = respostaLower.includes("correto") || respostaLower.includes("parabéns") || respostaLower.includes("certo") || respostaLower.includes("excelente");
+         
+         if (acertou) {
+            const hojeIndex = new Date().getDay() - 1; 
+            const indexAjustado = hojeIndex === -1 ? 6 : hojeIndex;
 
-        if(acertou) {
-            respostaIA = "✅ Correto! Excelente análise.";
-        } else {
-            respostaIA = `❌ Incorreto. Vou marcar este ponto para revisão.`;
-        }
+            // Atualiza Gráfico Semanal
+            setProgressoSemanal(prev => {
+                const novo = [...prev];
+                const valorAtual = novo[indexAjustado];
+                novo[indexAjustado] = valorAtual > 0 ? (valorAtual + 100) / 2 : 100;
+                return novo;
+            });
 
-        setChatMensagens(prev => [...prev, { role: "ai", content: respostaIA }]);
-        setIsTyping(false);
+            // Atualiza Stats Gerais e Salva no Banco
+            setStats(prev => ({ ...prev, acertos: prev.acertos + 1, questoesFeitas: prev.questoesFeitas + 1 }));
+            await salvarProgressoNoBanco(1, 1, 0, 0);
+         } else if (respostaLower.includes("incorreto") || respostaLower.includes("errado")) {
+             setStats(prev => ({ ...prev, erros: prev.erros + 1, questoesFeitas: prev.questoesFeitas + 1 }));
+             await salvarProgressoNoBanco(1, 0, 1, 0);
+         }
+      }
 
-        const hojeIndex = new Date().getDay() - 1; 
-        const indexAjustado = hojeIndex === -1 ? 6 : hojeIndex; 
-
-        setProgressoSemanal(prev => {
-            const novo = [...prev];
-            const valorAtual = novo[indexAjustado];
-            const novoValor = acertou ? 100 : 0;
-            novo[indexAjustado] = valorAtual > 0 ? (valorAtual + novoValor) / 2 : novoValor;
-            return novo;
-        });
-
-        setStats(prev => ({
-            ...prev, 
-            questoesFeitas: prev.questoesFeitas + 1, 
-            acertos: acertou ? prev.acertos + 1 : prev.acertos,
-            erros: !acertou ? prev.erros + 1 : prev.erros,
-            assuntosFracos: !acertou ? [...prev.assuntosFracos, topico] : prev.assuntosFracos
-        }));
-
-        await salvarProgressoNoBanco(1, acertou ? 1 : 0, !acertou ? 1 : 0, 0);
-    }, 1500);
+    } catch (error) {
+      console.error("Erro no chat:", error);
+      setChatMensagens(prev => [...prev, { role: "assistant", content: "❌ Ocorreu um erro ao conectar com o Tutor IA. Tente novamente." }]);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   // --- FUNÇÕES DE SISTEMA ---
@@ -916,26 +937,67 @@ export default function Dashboard() {
             </div>
         );
           
-      case "tutor_ia":
-          return (
-              <div className="animate-in fade-in slide-in-from-right-10 duration-500 h-[calc(100vh-140px)] flex flex-col">
-                  <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">💬 Tutor IA</h2>
-                  <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-6 overflow-y-auto mb-4 custom-scrollbar flex flex-col gap-4" ref={chatScrollRef}>
-                      {chatMensagens.map((msg, idx) => (
-                          <div key={idx} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                              <div className={`max-w-[80%] p-4 rounded-2xl ${msg.role === "user" ? "bg-blue-600 text-white rounded-tr-none" : "bg-slate-800 text-slate-200 rounded-tl-none border border-slate-700"}`}>
-                                  <div className="whitespace-pre-wrap font-sans text-sm leading-relaxed">{msg.content}</div>
-                              </div>
-                          </div>
-                      ))}
-                      {isTyping && (<div className="flex justify-start animate-pulse"><div className="bg-slate-800 p-4 rounded-2xl rounded-tl-none border border-slate-700 text-slate-500 text-sm">Digitando...</div></div>)}
+     case "tutor_ia":
+        return (
+          <div className="animate-in fade-in slide-in-from-right-10 duration-500 h-[calc(100vh-140px)] flex flex-col">
+            {/* CABEÇALHO DO CHAT */}
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-2xl font-bold flex items-center gap-2">💬 Tutor IA</h2>
+              {/* Mostra qual arquivo está servindo de base para o estudo */}
+              {arquivoLeitura && (
+                <span className="text-xs bg-blue-900/50 text-blue-300 border border-blue-500/30 px-3 py-1 rounded-full animate-in fade-in">
+                  📚 Estudando: {arquivoLeitura.title}
+                </span>
+              )}
+            </div>
+
+            {/* ÁREA DE MENSAGENS */}
+            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-6 overflow-y-auto mb-4 custom-scrollbar flex flex-col gap-4" ref={chatScrollRef}>
+              {chatMensagens.map((msg, idx) => (
+                <div key={idx} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] p-4 rounded-2xl shadow-sm ${
+                    msg.role === "user" 
+                      ? "bg-blue-600 text-white rounded-tr-none" 
+                      : "bg-slate-800 text-slate-200 rounded-tl-none border border-slate-700"
+                  }`}>
+                    <div className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                      {msg.content}
+                    </div>
                   </div>
-                  <div className={`bg-slate-900 border border-slate-800 rounded-2xl p-2 flex gap-2 relative transition-all duration-300 ${podcastTocando ? "mb-24 shadow-2xl border-purple-500/30" : ""}`}>
-                      <input type="text" placeholder="Responda ou tire dúvidas..." className="flex-1 bg-transparent text-white p-3 outline-none" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && enviarMensagemChat()} />
-                      <button onClick={enviarMensagemChat} className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-xl transition">➤</button>
+                </div>
+              ))}
+              
+              {/* INDICADOR DE DIGITANDO */}
+              {isTyping && (
+                <div className="flex justify-start animate-pulse">
+                  <div className="bg-slate-800 p-3 rounded-2xl rounded-tl-none border border-slate-700 text-slate-500 text-xs flex items-center gap-2">
+                     <span>🤖</span> O Tutor está escrevendo...
                   </div>
-              </div>
-          );
+                </div>
+              )}
+            </div>
+
+            {/* INPUT DE TEXTO */}
+            <div className={`bg-slate-900 border border-slate-800 rounded-2xl p-2 flex gap-2 relative transition-all duration-300 ${podcastTocando ? "mb-24 shadow-2xl border-purple-500/30" : ""}`}>
+              <input 
+                type="text" 
+                placeholder={arquivoLeitura ? "Pergunte sobre o arquivo ou responda..." : "Selecione um arquivo em 'Meus Arquivos' para começar..."}
+                className="flex-1 bg-transparent text-white p-3 outline-none placeholder:text-slate-600" 
+                value={chatInput} 
+                onChange={(e) => setChatInput(e.target.value)} 
+                onKeyDown={(e) => e.key === 'Enter' && !isTyping && enviarMensagemChat()} 
+                disabled={isTyping}
+              />
+              <button 
+                onClick={enviarMensagemChat} 
+                disabled={isTyping || !chatInput.trim()}
+                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white p-3 rounded-xl transition shadow-lg aspect-square flex items-center justify-center"
+              >
+                {isTyping ? "..." : "➤"}
+              </button>
+            </div>
+          </div>
+        );
 
       case "podcasts":
         return (<div className="animate-in fade-in slide-in-from-right-10 duration-500 pb-20"><div className="flex items-center justify-between mb-6"><h2 className="text-2xl font-bold">🎧 Estante de Podcasts</h2><button onClick={() => {setMenuAtivo("upload"); setFase("upload");}} className="bg-purple-600/20 text-purple-400 px-3 py-1 rounded-lg text-xs font-bold hover:bg-purple-600 hover:text-white transition">Gerar Novo</button></div><div className="grid gap-4">{meusPodcasts.length === 0 && <p className="text-slate-500">Nenhum podcast gerado.</p>}{meusPodcasts.map((pod) => (<div key={pod.id} className={`bg-slate-900 border ${podcastTocando?.id === pod.id ? "border-purple-500 bg-purple-900/10" : "border-slate-800"} p-5 rounded-xl hover:border-purple-500/50 transition flex justify-between items-center group`}><div className="flex items-center gap-5"><button onClick={() => tocarPodcast(pod)} className={`h-12 w-12 rounded-full flex items-center justify-center text-xl shadow-lg transition ${podcastTocando?.id === pod.id && isPlaying ? "bg-purple-500 text-white" : "bg-slate-800 text-purple-400 group-hover:bg-purple-500 group-hover:text-white"}`}>{podcastTocando?.id === pod.id && isPlaying ? "⏸" : "▶"}</button><div><h4 className={`font-bold ${podcastTocando?.id === pod.id ? "text-purple-400" : "text-white"}`}>{pod.titulo}</h4><p className="text-xs text-slate-500 flex gap-3 mt-1"><span>🕒 {pod.duracao}</span><span>📅 {pod.data}</span></p></div></div></div>))}</div></div>);
@@ -975,24 +1037,38 @@ export default function Dashboard() {
             </div>
         );
 
-      case "mapas": 
+      case "mapas":
         return (
-            <div className="animate-in fade-in slide-in-from-right-10 duration-500 pb-20">
-                <h2 className="text-2xl font-bold mb-6">Galeria de Mapas Mentais 🧠</h2>
-                <div className="grid md:grid-cols-2 gap-6">
-                    {historico.filter(i => i.mermaid).length === 0 && <p className="text-slate-500">Nenhum mapa mental gerado.</p>}
+          <div className="animate-in fade-in slide-in-from-right-10 duration-500 pb-20 h-[calc(100vh-100px)] flex flex-col">
+            <h2 className="text-2xl font-bold mb-4">Galeria de Mapas Mentais 🧠</h2>
+            
+            {historico.filter(i => i.mermaid).length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-slate-500">
+                   <div className="text-6xl mb-4">🗺️</div>
+                   <p>Nenhum mapa mental gerado ainda.</p>
+                   <button onClick={() => setMenuAtivo("upload")} className="mt-4 text-blue-400 hover:underline">Criar um novo</button>
+                </div>
+            ) : (
+                <div className="grid gap-8 h-full">
+                    {/* Renderiza apenas os mapas que tem código mermaid */}
                     {historico.filter(i => i.mermaid).map((item) => (
-                        <div key={item.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-purple-500 transition">
-                            <h4 className="font-bold text-white mb-2">{item.title}</h4>
-                            <div className="mermaid bg-slate-950 p-4 rounded-lg overflow-x-auto text-sm flex justify-center">
-                                {item.mermaid}
+                        <div key={item.id} className="flex flex-col h-[600px]"> 
+                            <div className="flex justify-between items-center mb-2 px-2">
+                                <h4 className="font-bold text-white text-lg">{item.title}</h4>
+                                <span className="text-xs text-slate-500">Arraste para mover • Scroll para zoom</span>
+                            </div>
+                            
+                            {/* AQUI ENTRA O NOVO COMPONENTE */}
+                            <div className="flex-1 border border-slate-700 rounded-xl overflow-hidden shadow-2xl">
+                                <MapaMentalViewer chart={item.mermaid} />
                             </div>
                         </div>
                     ))}
                 </div>
-            </div>
+            )}
+          </div>
         );
-      
+
       case "flashcards":
         return (
             <div className="animate-in fade-in slide-in-from-right-10 duration-500 pb-20">
