@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import mermaid from "mermaid";
-import PptxGenJS from "pptxgenjs"; // Exportação PPTX
-import jsPDF from "jspdf";         // Exportação PDF
+import PptxGenJS from "pptxgenjs"; 
+import jsPDF from "jspdf";         
 import MapaMentalViewer from '../components/MapaMentalViewer';
 
 // --- CONFIGURAÇÃO DO SUPABASE ---
@@ -14,10 +15,85 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+// --- INTERFACES ---
+interface Usuario {
+  id: string;
+  email?: string;
+  user_metadata?: {
+    display_name?: string;
+    avatar_url?: string;
+  };
+}
+
+interface Slide {
+  tipo: string;
+  titulo: string;
+  topicos: string[];
+  imagem?: string;
+  roteiro_fala: string;
+}
+
+interface HistoricoItem {
+  id: string;
+  title: string;
+  resumo: string;
+  mermaid?: string;
+  flashcards_data?: Flashcard[];
+  slides_data?: {
+    slides: Slide[];
+    referencias: string;
+  };
+  created_at?: string;
+}
+
+interface Flashcard {
+  pergunta: string;
+  resposta: string;
+}
+
+interface Podcast {
+  id: number;
+  titulo: string;
+  duracao: string;
+  data: string;
+  url: string;
+}
+
+interface Stats {
+  questoesFeitas: number;
+  acertos: number;
+  erros: number;
+  segundosEstudados: number;
+  assuntosFracos: string[];
+}
+
+interface Questao {
+  enunciado: string;
+  alternativas?: string[];
+}
+
+interface RoteiroEstruturado {
+  introducao: string;
+  desenvolvimento: string;
+  conclusao: string;
+}
+
+interface DadosIA {
+  resumo: string;
+  mermaid: string;
+  flashcards: Flashcard[];
+  slides: Slide[];
+  referencias_abnt: string;
+  roteiro_estruturado?: RoteiroEstruturado;
+  audio_base64?: string;
+  questoes?: Questao[];
+  referencia_abnt_arquivo?: string;
+  error?: string;
+}
+
 export default function Dashboard() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const slideImageInputRef = useRef<HTMLInputElement>(null);
   
   // --- REFERÊNCIAS ---
   const audioRef = useRef<HTMLAudioElement>(null); 
@@ -28,10 +104,10 @@ export default function Dashboard() {
 
   // --- ESTADOS GERAIS ---
   const [loading, setLoading] = useState(true);
-  const [usuario, setUsuario] = useState<any>(null);
+  const [usuario, setUsuario] = useState<Usuario | null>(null);
   const [menuAtivo, setMenuAtivo] = useState("inicio"); 
   const [menuPerfilAberto, setMenuPerfilAberto] = useState(false);
-  const [historico, setHistorico] = useState<any[]>([]);
+  const [historico, setHistorico] = useState<HistoricoItem[]>([]);
   const [menuMobileAberto, setMenuMobileAberto] = useState(false);
 
   // --- ESTADOS DE PERFIL ---
@@ -46,10 +122,10 @@ export default function Dashboard() {
   const [servicosSelecionados, setServicosSelecionados] = useState<string[]>([]);
   
   // --- ESTADOS DE LEITURA (MEUS ARQUIVOS) ---
-  const [arquivoLeitura, setArquivoLeitura] = useState<any>(null);
+  const [arquivoLeitura, setArquivoLeitura] = useState<HistoricoItem | null>(null);
 
   // --- ESTADOS DOS FLASHCARDS ---
-  const [flashcards, setFlashcards] = useState<any[]>([]); 
+  const [flashcards, setFlashcards] = useState<Flashcard[]>([]); 
   const [cardIndex, setCardIndex] = useState(0); 
   const [cardVirado, setCardVirado] = useState(false); 
   const [fimFlashcards, setFimFlashcards] = useState(false); 
@@ -60,8 +136,8 @@ export default function Dashboard() {
 
   // --- ESTADOS DO CHAT TUTOR IA ---
   const [chatInput, setChatInput] = useState("");
-  const [chatMensagens, setChatMensagens] = useState<any[]>([
-    { role: "ai", content: "Olá! Sou seu Tutor IA. Responda questões para alimentar seu gráfico de desempenho!" }
+  const [chatMensagens, setChatMensagens] = useState<{ role: string; content: string }[]>([
+    { role: "assistant", content: "Olá! Sou seu Tutor IA. Responda questões para alimentar seu gráfico de desempenho!" }
   ]);
   const [isTyping, setIsTyping] = useState(false);
 
@@ -69,7 +145,7 @@ export default function Dashboard() {
   const [semanaSelecionada, setSemanaSelecionada] = useState("Esta Semana");
   const [progressoSemanal, setProgressoSemanal] = useState([0, 0, 0, 0, 0, 0, 0]); 
   
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<Stats>({
       questoesFeitas: 0, 
       acertos: 0, 
       erros: 0, 
@@ -78,16 +154,16 @@ export default function Dashboard() {
   });
 
   // --- ESTADOS DO PODCAST ---
-  const [podcastTocando, setPodcastTocando] = useState<any>(null);
+  const [podcastTocando, setPodcastTocando] = useState<Podcast | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [meusPodcasts, setMeusPodcasts] = useState<any[]>([]); 
+  const [meusPodcasts, setMeusPodcasts] = useState<Podcast[]>([]); 
 
   // --- ESTADO DA SUGESTÃO ---
   const [sugestaoTexto, setSugestaoTexto] = useState("");
   const [enviandoSugestao, setEnviandoSugestao] = useState(false);
 
   // --- NOVOS ESTADOS: ROTEIRO E ABNT ---
-  const [roteiroAtual, setRoteiroAtual] = useState<any>(null);
+  const [roteiroAtual, setRoteiroAtual] = useState<RoteiroEstruturado | null>(null);
   const [referenciaArquivo, setReferenciaArquivo] = useState("");
   // --- ESTADOS PARA FERRAMENTA DE LINK ABNT ---
   const [linkInput, setLinkInput] = useState("");
@@ -95,10 +171,9 @@ export default function Dashboard() {
   const [loadingLink, setLoadingLink] = useState(false);
 
   // --- ESTADOS PARA APRESENTAÇÃO ---
-  const [slidesAtuais, setSlidesAtuais] = useState<any[]>([]);
+  const [slidesAtuais, setSlidesAtuais] = useState<Slide[]>([]);
   const [referenciasABNT, setReferenciasABNT] = useState("");
   const [slideIndex, setSlideIndex] = useState(0);
-  const [fonteSelecionada, setFonteSelecionada] = useState("font-sans");
 
   // =========================================================
   // === 1. CARREGAR DADOS E VERIFICAR LOGIN ===============
@@ -184,31 +259,8 @@ export default function Dashboard() {
     mermaid.initialize({ startOnLoad: false, theme: 'dark' });
   }, [router]);
 
-  // --- 2. CRONÔMETRO DE ESTUDO ---
-  useEffect(() => {
-      const timer = setInterval(async () => {
-          setStats(prev => ({ ...prev, segundosEstudados: prev.segundosEstudados + 1 }));
-          
-          if (usuario && stats.segundosEstudados > 0 && stats.segundosEstudados % 60 === 0) {
-              await salvarProgressoNoBanco(0, 0, 0, 60); 
-          }
-      }, 1000);
-      return () => clearInterval(timer);
-  }, [usuario, stats.segundosEstudados]);
-
-  // --- 3. CORREÇÃO MERMAID ---
-  useEffect(() => {
-    if ((menuAtivo === "mapas" || arquivoLeitura) && typeof mermaid !== 'undefined') {
-       setTimeout(() => { 
-           try {
-               mermaid.init(undefined, document.querySelectorAll('.mermaid'));
-           } catch(e) { console.log("Mermaid load", e) }
-       }, 500);
-    }
-  }, [menuAtivo, historico, arquivoLeitura]);
-
   // --- FUNÇÃO AUXILIAR: SALVAR PROGRESSO ---
-  const salvarProgressoNoBanco = async (qFeitas: number, acertos: number, erros: number, segundos: number) => {
+  const salvarProgressoNoBanco = useCallback(async (qFeitas: number, acertos: number, erros: number, segundos: number) => {
       if (!usuario) return;
       const hoje = new Date().toLocaleDateString('en-CA'); 
 
@@ -221,11 +273,11 @@ export default function Dashboard() {
 
       if (registroHoje) {
           await supabase.from('progresso_diario').update({
-                  questoes_feitas: registroHoje.questoes_feitas + qFeitas,
-                  acertos: registroHoje.acertos + acertos,
-                  erros: registroHoje.erros + erros,
-                  segundos_estudos: registroHoje.segundos_estudos + segundos
-              }).eq('id', registroHoje.id);
+              questoes_feitas: registroHoje.questoes_feitas + qFeitas,
+              acertos: registroHoje.acertos + acertos,
+              erros: registroHoje.erros + erros,
+              segundos_estudos: registroHoje.segundos_estudos + segundos
+          }).eq('id', registroHoje.id);
       } else {
           await supabase.from('progresso_diario').insert({
                   user_id: usuario.id,
@@ -236,8 +288,19 @@ export default function Dashboard() {
                   segundos_estudos: segundos
               });
       }
-  };
+  }, [usuario]);
 
+  // --- 2. CRONÔMETRO DE ESTUDO ---
+  useEffect(() => {
+      const timer = setInterval(async () => {
+          setStats(prev => ({ ...prev, segundosEstudados: prev.segundosEstudados + 1 }));
+          
+          if (usuario && stats.segundosEstudados > 0 && stats.segundosEstudados % 60 === 0) {
+              await salvarProgressoNoBanco(0, 0, 0, 60); 
+          }
+      }, 1000);
+      return () => clearInterval(timer);
+  }, [usuario, stats.segundosEstudados, salvarProgressoNoBanco]);
   const formatarTempo = (segundos: number) => {
       const h = Math.floor(segundos / 3600);
       const m = Math.floor((segundos % 3600) / 60);
@@ -250,66 +313,50 @@ export default function Dashboard() {
     if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
   }, [chatMensagens, menuAtivo]);
 
-  // --- LÓGICA DO CHAT TUTOR IA (ATUALIZADA) ---
+  // --- LÓGICA DO CHAT TUTOR IA (INTEGRADO COM RAG) ---
   const enviarMensagemChat = async () => {
     if (!chatInput.trim()) return;
 
-    // 1. Define o contexto: Tenta pegar o arquivo aberto agora ou o último salvo
-    const contextoAtual = arquivoLeitura?.resumo || historico[0]?.resumo || "O aluno está estudando tópicos gerais. Ajude-o com perguntas.";
+    // 1. Define o contexto
+    const contextoParaIA = arquivoLeitura?.resumo || historico[0]?.resumo || "O aluno não tem nenhum arquivo aberto no momento.";
 
-    // 2. Adiciona mensagem do usuário na tela imediatamente
+    // 2. Adiciona mensagem do usuário
     const msgUsuario = { role: "user", content: chatInput };
-    const novasMensagens = [...chatMensagens, msgUsuario]; // Cria o histórico atualizado
+    const novasMensagens = [...chatMensagens, msgUsuario]; 
     setChatMensagens(novasMensagens);
-    setChatInput(""); // Limpa o campo
-    setIsTyping(true); // Mostra "Digitando..."
+    setChatInput(""); 
+    setIsTyping(true); 
 
     try {
-      // 3. Chama a API Real que criamos
+      // 3. Envia para o Backend
       const response = await fetch('/api/chat-tutor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          messages: novasMensagens, // Envia o histórico da conversa
-          contexto: contextoAtual   // Envia o resumo do PDF
+          messages: novasMensagens,
+          contexto: contextoParaIA 
         }),
       });
       
       const data = await response.json();
       
-      // 4. Processa a resposta da IA
+      // 4. Processa a resposta
       if (data.reply) {
          setChatMensagens(prev => [...prev, { role: "assistant", content: data.reply }]);
          
-         // Lógica simples para detectar se o aluno acertou (baseado em palavras-chave)
-         // Isso atualiza os gráficos de desempenho
+         // Lógica para detectar acertos
          const respostaLower = data.reply.toLowerCase();
-         const acertou = respostaLower.includes("correto") || respostaLower.includes("parabéns") || respostaLower.includes("certo") || respostaLower.includes("excelente");
+         const acertou = respostaLower.includes("correto") || respostaLower.includes("parabéns") || respostaLower.includes("✅");
          
          if (acertou) {
-            const hojeIndex = new Date().getDay() - 1; 
-            const indexAjustado = hojeIndex === -1 ? 6 : hojeIndex;
-
-            // Atualiza Gráfico Semanal
-            setProgressoSemanal(prev => {
-                const novo = [...prev];
-                const valorAtual = novo[indexAjustado];
-                novo[indexAjustado] = valorAtual > 0 ? (valorAtual + 100) / 2 : 100;
-                return novo;
-            });
-
-            // Atualiza Stats Gerais e Salva no Banco
-            setStats(prev => ({ ...prev, acertos: prev.acertos + 1, questoesFeitas: prev.questoesFeitas + 1 }));
-            await salvarProgressoNoBanco(1, 1, 0, 0);
-         } else if (respostaLower.includes("incorreto") || respostaLower.includes("errado")) {
-             setStats(prev => ({ ...prev, erros: prev.erros + 1, questoesFeitas: prev.questoesFeitas + 1 }));
-             await salvarProgressoNoBanco(1, 0, 1, 0);
+             setStats(prev => ({ ...prev, acertos: prev.acertos + 1, questoesFeitas: prev.questoesFeitas + 1 }));
+             await salvarProgressoNoBanco(1, 1, 0, 0); 
          }
       }
 
     } catch (error) {
-      console.error("Erro no chat:", error);
-      setChatMensagens(prev => [...prev, { role: "assistant", content: "❌ Ocorreu um erro ao conectar com o Tutor IA. Tente novamente." }]);
+      console.error("Erro chat:", error);
+      setChatMensagens(prev => [...prev, { role: "assistant", content: "❌ Erro de conexão com o Tutor. Tente novamente." }]);
     } finally {
       setIsTyping(false);
     }
@@ -365,12 +412,12 @@ export default function Dashboard() {
           const data = await res.json();
           if(data.referencia) setReferenciaLinkGerada(data.referencia);
           else alert("Não foi possível gerar.");
-      } catch (e) { alert("Erro ao gerar referência."); }
+      } catch { alert("Erro ao gerar referência."); }
       finally { setLoadingLink(false); }
   };
 
   // --- LÓGICA DOS FLASHCARDS ---
-  const abrirDeckFlashcards = (deck: any[]) => {
+  const abrirDeckFlashcards = (deck: Flashcard[]) => {
       setFlashcards(deck); setCardIndex(0); setCardVirado(false); setFimFlashcards(false); setModoJogoAtivo(true);
   };
   const virarCarta = () => setCardVirado(!cardVirado);
@@ -433,7 +480,7 @@ export default function Dashboard() {
           setFotoPreview(publicUrl);
           alert("Foto de perfil atualizada com sucesso!");
 
-      } catch (error: any) {
+      } catch (error: unknown) {
           console.error("Erro ao subir foto:", error);
           alert("Erro ao atualizar foto. Verifique se criou o bucket 'avatars' como PUBLICO no Supabase.");
       } finally {
@@ -447,40 +494,6 @@ export default function Dashboard() {
   const processarTudo = async () => {
     if (!arquivo || !usuario) {
         alert("Selecione um arquivo.");
-        // --- FUNÇÃO QUE ESTÁ FALTANDO ---
-  const gerarAbntPorLink = async () => {
-      // Verifica se tem link
-      if(!linkInput.trim()) {
-          alert("Por favor, cole um link antes.");
-          return;
-      }
-      
-      setLoadingLink(true);
-
-      try {
-          // Chama a API pedindo a referência ABNT
-          const res = await fetch('/api/processar', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                  servicos: ['abnt_link'], 
-                  textoLink: linkInput 
-              })
-          });
-          
-          const data = await res.json();
-          
-          if(data.referencia) {
-              setReferenciaLinkGerada(data.referencia);
-          } else {
-              alert("Não foi possível gerar a referência.");
-          }
-      } catch (e) {
-          alert("Erro ao conectar com a IA.");
-      } finally {
-          setLoadingLink(false);
-      }
-  };
         return;
     }
 
@@ -514,21 +527,10 @@ export default function Dashboard() {
             })
         });
 
-        const dadosIA = await response.json();
+        const dadosIA: DadosIA = await response.json();
         if (dadosIA.error) throw new Error(dadosIA.error);
 
-        // --- NOVA FUNÇÃO: ABRIR ROTEIRO SALVO ---
-  const abrirRoteiroSalvo = (item: any) => {
-      if (item.slides_data && item.slides_data.roteiro) {
-          setRoteiroAtual(item.slides_data.roteiro);
-          setReferenciaArquivo(item.slides_data.referencia);
-          setMenuAtivo("apresentacao");
-      } else {
-          alert("Este arquivo não possui roteiro salvo.");
-      }
-  };
-
-        // 3. Salva no Banco (AQUI ADICIONEI O SALVAMENTO DE SLIDES)
+        // 3. Salva no Banco
         const { data: novoItem, error: erroSalvar } = await supabase
             .from('historicos')
             .insert({ 
@@ -551,7 +553,7 @@ export default function Dashboard() {
         // --- LÓGICA DE REDIRECIONAMENTO ---
         if (servicosSelecionados.includes("apresentacao") && dadosIA.roteiro_estruturado) {
             setRoteiroAtual(dadosIA.roteiro_estruturado);
-            setReferenciaArquivo(dadosIA.referencia_abnt_arquivo);
+            setReferenciaArquivo(dadosIA.referencia_abnt_arquivo || "");
             setMenuAtivo("apresentacao");
         }
         else if (servicosSelecionados.includes("podcast") && dadosIA.audio_base64) {
@@ -567,10 +569,10 @@ export default function Dashboard() {
         }
         else if (servicosSelecionados.includes("questoes") && dadosIA.questoes) {
             let textoChat = `🤖 **Questões Geradas sobre: ${arquivo.name}**\n\n`;
-            dadosIA.questoes.forEach((q: any, i: number) => {
-                textoChat += `**${i+1}. ${q.enunciado}**\n${q.alternativas.map((a: string) => `• ${a}`).join('\n')}\n\n`;
+            dadosIA.questoes.forEach((q: Questao, i: number) => {
+                textoChat += `**${i+1}. ${q.enunciado}**\n${q.alternativas ? q.alternativas.map((a: string) => `• ${a}`).join('\n') : ''}\n\n`;
             });
-            setChatMensagens(prev => [...prev, { role: "ai", content: textoChat }]);
+            setChatMensagens(prev => [...prev, { role: "assistant", content: textoChat }]);
             setMenuAtivo("tutor_ia");
         } 
         else if (servicosSelecionados.includes("flashcards") && dadosIA.flashcards) { 
@@ -583,20 +585,20 @@ export default function Dashboard() {
             setMenuAtivo("arquivos"); setArquivoLeitura(novoItem[0]); 
         }
 
-    } catch (erro: any) {
-        alert("Erro ao processar: " + erro.message);
+    } catch (erro: unknown) {
+        alert("Erro ao processar: " + (erro as Error).message);
         setFase("upload");
     }
   };
 
   // --- AUXILIARES ---
   const fecharPodcast = () => { if(audioRef.current) audioRef.current.pause(); setIsPlaying(false); setPodcastTocando(null); };
-  const tocarPodcast = (podcast: any) => {
+  const tocarPodcast = (podcast: Podcast) => {
     if (podcastTocando?.id === podcast.id) { if (isPlaying) { audioRef.current?.pause(); setIsPlaying(false); } else { audioRef.current?.play(); setIsPlaying(true); } } else { setPodcastTocando(podcast); setIsPlaying(true); setTimeout(() => { if(audioRef.current) audioRef.current.play().catch(e => console.log("Erro play:", e)); }, 100); }
   };
   
   // Função para atualizar senha
-  const atualizarSenha = async () => { if (novaSenha.length < 6) { alert("Mínimo 6 caracteres."); return; } setLoadingSenha(true); try { await supabase.auth.updateUser({ password: novaSenha }); alert("Senha atualizada!"); setNovaSenha(""); } catch (e) { alert("Erro ao atualizar."); } finally { setLoadingSenha(false); } };
+  const atualizarSenha = async () => { if (novaSenha.length < 6) { alert("Mínimo 6 caracteres."); return; } setLoadingSenha(true); try { await supabase.auth.updateUser({ password: novaSenha }); alert("Senha atualizada!"); setNovaSenha(""); } catch { alert("Erro ao atualizar."); } finally { setLoadingSenha(false); } };
 
   // --- MUDANÇA AQUI: VOLTOU A SER UM ALERTA SIMPLES ---
   const gerenciarPlano = () => {
@@ -604,7 +606,7 @@ export default function Dashboard() {
   };
 
   // --- NOVA FUNÇÃO: ABRIR SLIDES SALVOS ---
-  const abrirSlidesSalvos = (item: any) => {
+  const abrirSlidesSalvos = (item: HistoricoItem) => {
       if (item.slides_data && item.slides_data.slides) {
           setSlidesAtuais(item.slides_data.slides);
           setReferenciasABNT(item.slides_data.referencias);
@@ -619,22 +621,23 @@ export default function Dashboard() {
   // =========================================================
 
   // 1. Atualizar conteúdo ao digitar (Edição)
-  const atualizarSlideAtual = (campo: string, valor: any, indexTopico?: number) => {
+  const atualizarSlideAtual = (campo: string, valor: string | string[] | null, indexTopico?: number) => {
     const novosSlides = [...slidesAtuais];
-    if (campo === "titulo") novosSlides[slideIndex].titulo = valor;
-    else if (campo === "imagem") novosSlides[slideIndex].imagem = valor; // Salva imagem
-    else if (campo === "roteiro") novosSlides[slideIndex].roteiro_fala = valor;
-    else if (campo === "topico" && typeof indexTopico === 'number') novosSlides[slideIndex].topicos[indexTopico] = valor;
+    if (campo === "titulo" && typeof valor === 'string') novosSlides[slideIndex].titulo = valor;
+    else if (campo === "imagem") novosSlides[slideIndex].imagem = typeof valor === 'string' ? valor : undefined;
+    else if (campo === "roteiro" && typeof valor === 'string') novosSlides[slideIndex].roteiro_fala = valor;
+    else if (campo === "topico" && typeof indexTopico === 'number' && typeof valor === 'string') novosSlides[slideIndex].topicos[indexTopico] = valor;
     setSlidesAtuais(novosSlides);
   };
 
   // --- NOVA FUNÇÃO: ADICIONAR SLIDE VAZIO MANUALMENTE ---
-  const adicionarNovoSlide = () => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _adicionarNovoSlide = () => {
       const novoSlide = {
           tipo: "conteudo",
           titulo: "Novo Título",
           topicos: ["Clique para editar o tópico"],
-          imagem: null,
+          imagem: undefined,
           roteiro_fala: ""
       };
       // Adiciona após o slide atual
@@ -645,7 +648,8 @@ export default function Dashboard() {
   };
 
   // --- NOVA FUNÇÃO: UPLOAD DE IMAGEM PARA O SLIDE ---
-  const handleImagemSlideUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _handleImagemSlideUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
       const base64 = await converterBase64(file);
@@ -653,12 +657,13 @@ export default function Dashboard() {
   };
 
   // 3. Baixar PPTX (Com Design)
-  const baixarPPTX = () => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _baixarPPTX = () => {
       const pres = new PptxGenJS();
       pres.title = slidesAtuais[0]?.titulo || "Apresentação";
 
       slidesAtuais.forEach((slide) => {
-          let slidePPT = pres.addSlide();
+          const slidePPT = pres.addSlide();
           
           // Lógica de Design por Tipo de Slide
           if (slide.tipo === "capa") {
@@ -693,7 +698,7 @@ export default function Dashboard() {
           }
 
           // Tópicos
-          let textoTopicos = slide.topicos.map((t: string) => ({ text: t, options: { bullet: slide.tipo === 'conteudo' } }));
+          const textoTopicos = slide.topicos.map((t: string) => ({ text: t, options: { bullet: slide.tipo === 'conteudo' } }));
           slidePPT.addText(textoTopicos, { 
               x: slide.tipo === 'conteudo' ? '18%' : 0.5, 
               y: 1.8, 
@@ -710,7 +715,8 @@ export default function Dashboard() {
   };
 
   // 4. Baixar PDF (Com Design)
-  const baixarPDF = () => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _baixarPDF = () => {
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     
     slidesAtuais.forEach((slide, index) => {
@@ -749,7 +755,7 @@ export default function Dashboard() {
             if (slide.imagem) {
                 try {
                     doc.addImage(slide.imagem, "JPEG", 200, 50, 80, 60);
-                } catch(e){}
+                } catch {}
             }
 
             doc.setTextColor(50, 50, 50);
@@ -767,7 +773,8 @@ export default function Dashboard() {
     doc.save("Apresentacao.pdf");
   };
 
-  const copiarReferencia = () => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _copiarReferencia = () => {
       navigator.clipboard.writeText(referenciasABNT);
       alert("Referência copiada!");
   };
@@ -847,15 +854,15 @@ export default function Dashboard() {
                        <h4 className="text-slate-300 font-bold mb-4">O que você quer gerar?</h4>
                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
                            {/* --- OPÇÃO NOVA DE APRESENTAÇÃO --- */}
-                           <ServicoCard id="apresentacao" icon="🖥️" titulo={<span translate="no">Apresentação</span>} desc="Roteiro + Normas ABNT." selecionado={servicosSelecionados.includes("apresentacao")} onClick={() => toggleServico("apresentacao")} />
+                           <ServicoCard icon="🖥️" titulo={<span translate="no">Apresentação</span>} desc="Roteiro + Normas ABNT." selecionado={servicosSelecionados.includes("apresentacao")} onClick={() => toggleServico("apresentacao")} />
                            
-                           <ServicoCard id="resumo" icon="📝" titulo="Resumo" desc="Vai para 'Meus Arquivos'." selecionado={servicosSelecionados.includes("resumo")} onClick={() => toggleServico("resumo")} />
-                           <ServicoCard id="mapa" icon="🧠" titulo="Mapa Mental" desc="Vai para 'Galeria'." selecionado={servicosSelecionados.includes("mapa")} onClick={() => toggleServico("mapa")} />
-                           <ServicoCard id="podcast" icon="🎧" titulo="Podcast AI" desc="Gera um Áudio com Voz Real." selecionado={servicosSelecionados.includes("podcast")} onClick={() => toggleServico("podcast")} />
+                           <ServicoCard icon="📝" titulo="Resumo" desc="Vai para 'Meus Arquivos'." selecionado={servicosSelecionados.includes("resumo")} onClick={() => toggleServico("resumo")} />
+                           <ServicoCard icon="🧠" titulo="Mapa Mental" desc="Vai para 'Galeria'." selecionado={servicosSelecionados.includes("mapa")} onClick={() => toggleServico("mapa")} />
+                           <ServicoCard icon="🎧" titulo="Podcast AI" desc="Gera um Áudio com Voz Real." selecionado={servicosSelecionados.includes("podcast")} onClick={() => toggleServico("podcast")} />
                            
-                           <ServicoCard id="flashcards" icon="🃏" titulo={<span translate="no">Flashcards</span>} desc="Vai para 'Decks'." selecionado={servicosSelecionados.includes("flashcards")} onClick={() => toggleServico("flashcards")} />
+                           <ServicoCard icon="🃏" titulo={<span translate="no">Flashcards</span>} desc="Vai para 'Decks'." selecionado={servicosSelecionados.includes("flashcards")} onClick={() => toggleServico("flashcards")} />
                            
-                           <ServicoCard id="questoes" icon="❓" titulo="Questões" desc="Vai para 'Tutor IA'." selecionado={servicosSelecionados.includes("questoes")} onClick={() => toggleServico("questoes")} />
+                           <ServicoCard icon="❓" titulo="Questões" desc="Vai para 'Tutor IA'." selecionado={servicosSelecionados.includes("questoes")} onClick={() => toggleServico("questoes")} />
                        </div>
                        {servicosSelecionados.includes("questoes") && (
                            <div className="bg-slate-800/50 border border-blue-500/30 rounded-xl p-6 mb-8 animate-in zoom-in-95 duration-300">
@@ -940,10 +947,8 @@ export default function Dashboard() {
      case "tutor_ia":
         return (
           <div className="animate-in fade-in slide-in-from-right-10 duration-500 h-[calc(100vh-140px)] flex flex-col">
-            {/* CABEÇALHO DO CHAT */}
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-2xl font-bold flex items-center gap-2">💬 Tutor IA</h2>
-              {/* Mostra qual arquivo está servindo de base para o estudo */}
               {arquivoLeitura && (
                 <span className="text-xs bg-blue-900/50 text-blue-300 border border-blue-500/30 px-3 py-1 rounded-full animate-in fade-in">
                   📚 Estudando: {arquivoLeitura.title}
@@ -951,7 +956,6 @@ export default function Dashboard() {
               )}
             </div>
 
-            {/* ÁREA DE MENSAGENS */}
             <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-6 overflow-y-auto mb-4 custom-scrollbar flex flex-col gap-4" ref={chatScrollRef}>
               {chatMensagens.map((msg, idx) => (
                 <div key={idx} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
@@ -966,8 +970,6 @@ export default function Dashboard() {
                   </div>
                 </div>
               ))}
-              
-              {/* INDICADOR DE DIGITANDO */}
               {isTyping && (
                 <div className="flex justify-start animate-pulse">
                   <div className="bg-slate-800 p-3 rounded-2xl rounded-tl-none border border-slate-700 text-slate-500 text-xs flex items-center gap-2">
@@ -977,7 +979,6 @@ export default function Dashboard() {
               )}
             </div>
 
-            {/* INPUT DE TEXTO */}
             <div className={`bg-slate-900 border border-slate-800 rounded-2xl p-2 flex gap-2 relative transition-all duration-300 ${podcastTocando ? "mb-24 shadow-2xl border-purple-500/30" : ""}`}>
               <input 
                 type="text" 
@@ -1024,9 +1025,8 @@ export default function Dashboard() {
                             {historico.map((item) => (
                                 <div key={item.id} onClick={() => {if(item.slides_data) abrirSlidesSalvos(item); else setArquivoLeitura(item);}} className="bg-slate-900 border border-slate-800 p-5 rounded-xl hover:border-blue-500 transition flex justify-between items-center cursor-pointer group">
                                     <div className="flex items-center gap-4">
-                                        {/* Ícone muda se for apresentação */}
                                         <div className="h-12 w-12 bg-slate-800 group-hover:bg-blue-900/30 rounded-lg flex items-center justify-center text-2xl transition">{item.slides_data ? '🖥️' : '📄'}</div>
-                                        <div><h4 className="font-bold text-white group-hover:text-blue-400 transition">{item.title}</h4><p className="text-xs text-slate-500">{new Date(item.created_at).toLocaleDateString()}</p></div>
+                                        <div><h4 className="font-bold text-white group-hover:text-blue-400 transition">{item.title}</h4><p className="text-xs text-slate-500">{new Date(item.created_at || Date.now()).toLocaleDateString()}</p></div>
                                     </div>
                                     <button className="text-blue-400 text-sm hover:underline">{item.slides_data ? 'Ver Apresentação' : 'Ler Resumo'}</button>
                                 </div>
@@ -1058,9 +1058,9 @@ export default function Dashboard() {
                                 <span className="text-xs text-slate-500">Arraste para mover • Scroll para zoom</span>
                             </div>
                             
-                            {/* AQUI ENTRA O NOVO COMPONENTE */}
+                            {/* AQUI ENTRA O NOVO COMPONENTE DE MAPA */}
                             <div className="flex-1 border border-slate-700 rounded-xl overflow-hidden shadow-2xl">
-                                <MapaMentalViewer chart={item.mermaid} />
+                                <MapaMentalViewer chart={item.mermaid!} />
                             </div>
                         </div>
                     ))}
@@ -1074,17 +1074,16 @@ export default function Dashboard() {
             <div className="animate-in fade-in slide-in-from-right-10 duration-500 pb-20">
                 {!modoJogoAtivo ? (
                     <>
-                          {/* --- PROTEÇÃO NO TÍTULO --- */}
                           <h2 className="text-2xl font-bold mb-6">Meus Decks de <span translate="no">Flashcards</span> 🃏</h2>
                           <div className="grid md:grid-cols-3 gap-6">
                             {historico.filter(h => h.flashcards_data).length === 0 && <p className="text-slate-500 col-span-3">Nenhum deck criado ainda.</p>}
                             {historico.filter(h => h.flashcards_data).map((item) => (
-                                <div key={item.id} onClick={() => abrirDeckFlashcards(item.flashcards_data)} className="aspect-[3/4] bg-slate-900 border border-slate-800 hover:border-orange-500 rounded-2xl p-6 flex flex-col justify-between cursor-pointer transition group relative overflow-hidden">
+                                <div key={item.id} onClick={() => abrirDeckFlashcards(item.flashcards_data!)} className="aspect-[3/4] bg-slate-900 border border-slate-800 hover:border-orange-500 rounded-2xl p-6 flex flex-col justify-between cursor-pointer transition group relative overflow-hidden">
                                     <div className="absolute top-0 right-0 bg-orange-600 text-white text-xs font-bold px-2 py-1 rounded-bl-lg">NOVO</div>
                                     <div className="text-4xl">🗂️</div>
                                     <div>
                                         <h4 className="font-bold text-white text-lg leading-tight mb-2 group-hover:text-orange-400 transition">{item.title}</h4>
-                                        <p className="text-sm text-slate-500">{item.flashcards_data.length} cartas</p>
+                                        <p className="text-sm text-slate-500">{item.flashcards_data!.length} cartas</p>
                                     </div>
                                     <button className="w-full bg-slate-800 group-hover:bg-orange-600 text-white py-2 rounded-lg font-bold text-sm transition mt-4">Praticar</button>
                                 </div>
@@ -1193,7 +1192,7 @@ export default function Dashboard() {
                     <div className="flex items-center gap-6 mb-8 pb-8 border-b border-slate-800">
                         <div className="h-24 w-24 rounded-full flex items-center justify-center text-4xl font-bold text-white border-4 border-slate-950 shadow-lg overflow-hidden bg-gradient-to-br from-blue-600 to-purple-600 relative">
                             {/* --- MOSTRA A FOTO CARREGADA OU A INICIAL --- */}
-                            {fotoPreview ? <img src={fotoPreview} className="w-full h-full object-cover" /> : usuario?.email?.charAt(0).toUpperCase()}
+                            {fotoPreview ? <Image src={fotoPreview} alt="Foto de perfil" fill className="object-cover" /> : usuario?.email?.charAt(0).toUpperCase()}
                             {uploadingFoto && <div className="absolute inset-0 bg-black/50 flex items-center justify-center"><div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></div></div>}
                         </div>
                         <div>
@@ -1301,7 +1300,7 @@ export default function Dashboard() {
                   onClick={() => setMenuPerfilAberto(!menuPerfilAberto)} 
                   className="h-10 w-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center font-bold text-white shadow-lg border-2 border-slate-900 cursor-pointer overflow-hidden"
                 >
-                  {fotoPreview ? <img src={fotoPreview} className="w-full h-full object-cover" /> : usuario?.email?.charAt(0).toUpperCase()}
+                  {fotoPreview ? <Image src={fotoPreview} alt="Avatar" fill className="object-cover" /> : usuario?.email?.charAt(0).toUpperCase()}
                 </button>
                 
                 {menuPerfilAberto && (
@@ -1362,11 +1361,12 @@ export default function Dashboard() {
 
     </div>
   );
+}
+
 // Componentes
-function BotaoMenu({ icone, texto, ativo, onClick }: any) { return <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition font-medium ${ativo ? "bg-blue-600/10 text-blue-400 border border-blue-600/20" : "text-slate-400 hover:bg-slate-800 hover:text-white"}`}><span>{icone}</span> {texto}</button>; }
-function CardStat({ icone, numero, texto, cor }: any) { 
-    const cores: any = { blue: "bg-blue-500/10 text-blue-400 border-blue-500/20", purple: "bg-purple-500/10 text-purple-400 border-purple-500/20", orange: "bg-orange-500/10 text-orange-400 border-orange-500/20" }; 
+function BotaoMenu({ icone, texto, ativo, onClick }: { icone: string; texto: string | React.ReactNode; ativo: boolean; onClick: () => void }) { return <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition font-medium ${ativo ? "bg-blue-600/10 text-blue-400 border border-blue-600/20" : "text-slate-400 hover:bg-slate-800 hover:text-white"}`}><span>{icone}</span> {texto}</button>; }
+function CardStat({ icone, numero, texto, cor }: { icone: string; numero: number; texto: string; cor: string }) { 
+    const cores: { [key: string]: string } = { blue: "bg-blue-500/10 text-blue-400 border-blue-500/20", purple: "bg-purple-500/10 text-purple-400 border-purple-500/20", orange: "bg-orange-500/10 text-orange-400 border-orange-500/20" }; 
     return <div className={`p-6 rounded-2xl border ${cores[cor] || cores.blue} flex items-center gap-4`}><div className="text-3xl">{icone}</div><div><div className="text-2xl font-bold text-white">{numero}</div><div className="text-xs opacity-80">{texto}</div></div></div>; 
 }
-function ServicoCard({ id, icon, titulo, desc, selecionado, onClick, disabled }: any) { return <div onClick={disabled ? undefined : onClick} className={`p-4 rounded-xl border-2 transition cursor-pointer flex items-center gap-4 ${disabled ? "opacity-50 cursor-not-allowed border-slate-800 bg-slate-900" : selecionado ? "border-blue-500 bg-blue-500/10" : "border-slate-800 bg-slate-900 hover:border-slate-600"}`}><div className="text-3xl">{icon}</div><div><h4 className={`font-bold ${selecionado ? "text-blue-400" : "text-white"}`}>{titulo}</h4><p className="text-xs text-slate-400">{desc}</p></div>{selecionado && <div className="ml-auto text-blue-500">✅</div>}</div>; }
-}
+function ServicoCard({ icon, titulo, desc, selecionado, onClick, disabled = false }: { icon: string; titulo: string | React.ReactNode; desc: string; selecionado: boolean; onClick: () => void; disabled?: boolean }) { return <div onClick={disabled ? undefined : onClick} className={`p-4 rounded-xl border-2 transition cursor-pointer flex items-center gap-4 ${disabled ? "opacity-50 cursor-not-allowed border-slate-800 bg-slate-900" : selecionado ? "border-blue-500 bg-blue-500/10" : "border-slate-800 bg-slate-900 hover:border-slate-600"}`}><div className="text-3xl">{icon}</div><div><h4 className={`font-bold ${selecionado ? "text-blue-400" : "text-white"}`}>{titulo}</h4><p className="text-xs text-slate-400">{desc}</p></div>{selecionado && <div className="ml-auto text-blue-500">✅</div>}</div>; }

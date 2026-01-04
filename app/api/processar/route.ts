@@ -1,19 +1,20 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import { extrairTextoDoBuffer } from '@/lib/extrator';
+// CORREÇÃO: Caminho relativo para garantir que encontre o arquivo na pasta lib
+import { extrairTextoDoBuffer } from '../../../lib/extrator';
+
 export const dynamic = 'force-dynamic';
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY, 
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 export async function POST(req: Request) {
   try {
-    // Aumentamos o limite de leitura do JSON para evitar erros em arquivos grandes
-    const body = await req.json(); 
-    const { fileBase64, mimeType, servicos, textoLink } = body;
+    const body = await req.json();
+    const { fileBase64, mimeType, servicos, textoLink, configQuestao } = body;
 
-    console.log("🧠 Processando serviço:", servicos);
+    console.log("🧠 Processando serviços:", servicos);
 
     // --- MODO ABNT LINK ---
     if (servicos.includes('abnt_link')) {
@@ -30,13 +31,10 @@ export async function POST(req: Request) {
     const ehImagem = mimeType && mimeType.startsWith('image/');
     
     if (!ehImagem && fileBase64) {
-        // --- AQUI ESTA A CORREÇÃO PRINCIPAL ---
-        // 1. Remove cabeçalho (data:application...)
-        // 2. Remove TODOS os espaços em branco, quebras de linha e tabs (\s no regex)
         const base64Limpo = fileBase64.replace(/^data:.*;base64,/, "").replace(/[\s\n\r]/g, "");
-        
         try {
             const buffer = Buffer.from(base64Limpo, 'base64');
+            // CORREÇÃO: Enviamos APENAS o buffer (1 argumento)
             conteudoParaIA = await extrairTextoDoBuffer(buffer);
         } catch (e) {
             console.error("Erro ao converter base64:", e);
@@ -44,50 +42,59 @@ export async function POST(req: Request) {
         }
     }
 
-    // --- PROMPT E CHAMADA OPENAI ---
-    const systemPrompt = `
-      Você é um Tutor IA. Responda ESTRITAMENTE em JSON.
-      Baseie-se neste texto:
-      "${conteudoParaIA ? conteudoParaIA.substring(0, 20000) : 'Conteúdo visual/vazio'}"
-      
-      FORMATO:
-      {
-        ${servicos.includes('resumo') ? '"resumo": "Resumo rico em HTML (<p>, <b>).",' : ''}
-        ${servicos.includes('flashcards') ? '"flashcards": [{ "frente": "...", "verso": "..." }],' : ''}
-        ${servicos.includes('questoes') ? `"questoes": [{ "enunciado": "...", "alternativas": ["A)..."], "correta": 0, "explicacao": "..." }],` : ''}
-        ${servicos.includes('mapa') ? '"mermaid": "graph TD; A-->B;",' : ''}
-        ${servicos.includes('podcast') ? '"podcast_script": "Olá estudantes...",' : ''}
-        ${servicos.includes('apresentacao') ? '"roteiro_estruturado": { "introducao": "...", "desenvolvimento": "...", "conclusao": "..." }, "referencia_abnt_arquivo": "..." ' : ''}
-      }
+    // --- PROMPT DINÂMICO ---
+    let instrucoesSistema = `
+      Você é o "FocaLab IA", um tutor especialista.
+      Analise o texto e gere o JSON solicitado.
+      Responda em Português do Brasil.
     `;
 
-    const messages: any[] = [{ role: "system", content: systemPrompt }];
+    if (servicos.includes('flashcards')) {
+      instrucoesSistema += `\n[FLASHCARDS]: Crie 10 flashcards. JSON: "flashcards": [{ "pergunta": "...", "resposta": "..." }]`;
+    }
+
+    if (servicos.includes('mapa')) {
+      instrucoesSistema += `\n[MAPA MENTAL]: Use sintaxe Mermaid "graph TD". Use colchetes [] para temas e parenteses () para subtemas. JSON: "mermaid": "graph TD; A[Tema]-->B(Sub)..."`;
+    }
+
+    if (servicos.includes('questoes')) {
+      const tipo = configQuestao?.tipo || 'mista';
+      const nivel = configQuestao?.dificuldade || 'medio';
+      instrucoesSistema += `\n[QUESTÕES]: 5 questões nível ${nivel}, estilo ${tipo}. JSON: "questoes": [{ "enunciado": "...", "alternativas": ["A..", "B.."], "correta": 0, "explicacao": "..." }]`;
+    }
+
+    if (servicos.includes('resumo')) instrucoesSistema += `\n[RESUMO]: "resumo": "Texto em HTML (<p>, <b>)."`;
+    if (servicos.includes('apresentacao')) instrucoesSistema += `\n[APRESENTAÇÃO]: "roteiro_estruturado": { "introducao": "...", "desenvolvimento": "...", "conclusao": "..." }, "referencia_abnt_arquivo": "..."`;
+    if (servicos.includes('podcast')) instrucoesSistema += `\n[PODCAST]: "podcast_script": "Roteiro falado..."`;
+
+    // --- CHAMADA OPENAI ---
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [{ role: "system", content: instrucoesSistema }];
 
     if (ehImagem) {
        messages.push({
          role: "user",
          content: [
-           { type: "text", text: "Analise a imagem." },
+           { type: "text", text: "Analise esta imagem acadêmica e gere o JSON." },
            { type: "image_url", image_url: { url: fileBase64 } } 
          ]
        });
     } else {
-        // Se for PDF mas não saiu texto
-        if (!conteudoParaIA || conteudoParaIA.length < 50) {
-            return NextResponse.json({ error: "Não foi possível ler texto deste PDF. Tente um arquivo com texto selecionável (não imagem)." }, { status: 400 });
-        }
-        messages.push({ role: "user", content: "Analise o texto extraído acima." });
+       if (!conteudoParaIA || conteudoParaIA.length < 50) {
+           return NextResponse.json({ error: "Texto insuficiente no arquivo." }, { status: 400 });
+       }
+       messages.push({ role: "user", content: `Analise este texto:\n\n"${conteudoParaIA.substring(0, 25000)}"` });
     }
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: messages,
       response_format: { type: "json_object" },
+      temperature: 0.5,
     });
 
     const dadosProcessados = JSON.parse(completion.choices[0].message.content || "{}");
 
-    // Gerar Áudio se necessário
+    // --- GERAR AUDIO ---
     if (servicos.includes('podcast') && dadosProcessados.podcast_script) {
         try {
             const mp3 = await openai.audio.speech.create({
@@ -100,8 +107,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json(dadosProcessados);
 
-  } catch (error: any) {
-    console.error('❌ ERRO FATAL:', error);
-    return NextResponse.json({ error: 'Erro no servidor: ' + error.message }, { status: 500 });
+  } catch (error: unknown) {
+    console.error('❌ ERRO:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+    return NextResponse.json({ error: 'Erro no servidor: ' + errorMessage }, { status: 500 });
   }
 }
