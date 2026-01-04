@@ -17,18 +17,23 @@ export default function MapaMentalViewer({ chart }: MapaProps) {
   useEffect(() => {
     setIsMounted(true);
     
-    // Configuração de cores vibrantes
+    // Configuração de cores e fonte
     mermaid.initialize({ 
       startOnLoad: true,
       theme: 'base',
       securityLevel: 'loose',
+      fontFamily: 'arial, sans-serif',
       themeVariables: {
         primaryColor: '#1e3a8a', // Azul escuro
         primaryTextColor: '#fff',
         primaryBorderColor: '#60a5fa',
-        lineColor: '#f59e0b', // Laranja
+        lineColor: '#f59e0b', // Laranja vibrante
         secondaryColor: '#db2777',
-        tertiaryColor: '#4f46e5'
+        tertiaryColor: '#4f46e5',
+        fontSize: '18px' // Fonte maior para leitura
+      },
+      flowchart: {
+        curve: 'basis' // Curvas mais suaves
       }
     });
   }, []);
@@ -37,10 +42,7 @@ export default function MapaMentalViewer({ chart }: MapaProps) {
     if (isMounted && chart) {
         const renderMap = async () => {
             try {
-                // Limpa o código para evitar quebras
                 const cleanChart = chart.replace(/"/g, "'"); 
-                
-                // Força a renderização
                 const { svg } = await mermaid.render('mermaid-svg-' + Date.now(), cleanChart);
                 if (elementRef.current) {
                     elementRef.current.innerHTML = svg;
@@ -58,46 +60,60 @@ export default function MapaMentalViewer({ chart }: MapaProps) {
   const downloadImage = async () => {
     if (elementRef.current === null) return;
     try {
-      // Pega o SVG gerado
       const svgElement = elementRef.current.querySelector('svg');
       if (!svgElement) return;
 
-      // Converte para PNG com fundo escuro
-      const dataUrl = await toPng(elementRef.current, { backgroundColor: '#0f172a', quality: 1.0, pixelRatio: 3 });
+      // CONFIGURAÇÃO DE ALTA QUALIDADE
+      const dataUrl = await toPng(elementRef.current, { 
+          backgroundColor: '#0f172a', // Fundo escuro igual do app
+          quality: 1.0, 
+          pixelRatio: 4, // 4x a resolução da tela (HD)
+          cacheBust: true,
+      });
+      
       const link = document.createElement('a');
-      link.download = 'mapa-focalab.png';
+      link.download = 'mapa-focalab-hd.png';
       link.href = dataUrl;
       link.click();
-    } catch (err) { alert('Erro ao baixar imagem.'); }
+    } catch (err) { 
+        alert('Erro ao baixar imagem. Tente dar zoom out antes de baixar.'); 
+    }
   };
 
   if (!isMounted) return <div className="text-slate-500 text-center p-4">Carregando visualizador...</div>;
 
   return (
-    <div className="flex flex-col h-full bg-slate-900 rounded-xl border border-slate-800 overflow-hidden relative group">
-      <div className="absolute top-2 right-2 z-20">
-         <button onClick={downloadImage} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded shadow text-xs font-bold transition flex items-center gap-1">📸 Baixar Imagem</button>
+    <div className="flex flex-col h-full w-full bg-slate-900 rounded-xl border border-slate-800 overflow-hidden relative group">
+      {/* Botão de Download flutuante */}
+      <div className="absolute top-4 right-4 z-50">
+         <button onClick={downloadImage} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow-lg text-xs font-bold transition flex items-center gap-2 border border-blue-400/30">
+            📸 Baixar HD
+         </button>
       </div>
 
-      <TransformWrapper initialScale={0.8} minScale={0.2} maxScale={4} centerOnInit={true}>
+      <TransformWrapper 
+        initialScale={0.6} 
+        minScale={0.1} 
+        maxScale={8} 
+        centerOnInit={true}
+        limitToBounds={false} // REMOVE A BARREIRA (Pode arrastar livremente)
+      >
         {({ zoomIn, zoomOut, resetTransform }) => (
           <>
-            <div className="absolute bottom-4 left-4 z-20 flex bg-slate-800/90 rounded-lg p-1 border border-slate-700">
-                <button onClick={() => zoomIn()} className="p-2 text-white text-lg hover:bg-slate-700 rounded">+</button>
-                <button onClick={() => zoomOut()} className="p-2 text-white text-lg hover:bg-slate-700 rounded">-</button>
-                <button onClick={() => resetTransform()} className="p-2 text-white text-lg hover:bg-slate-700 rounded">↺</button>
+            <div className="absolute bottom-4 left-4 z-50 flex flex-col gap-2 bg-slate-800/90 rounded-lg p-2 border border-slate-700 shadow-xl">
+                <button onClick={() => zoomIn()} className="p-2 text-white hover:bg-slate-700 rounded bg-slate-900/50">+</button>
+                <button onClick={() => zoomOut()} className="p-2 text-white hover:bg-slate-700 rounded bg-slate-900/50">-</button>
+                <button onClick={() => resetTransform()} className="p-2 text-white hover:bg-slate-700 rounded bg-slate-900/50">↺</button>
             </div>
 
-            <TransformComponent wrapperClass="w-full h-full" contentClass="w-full h-full flex items-center justify-center">
-              <div className="w-full h-full flex items-center justify-center p-4 cursor-grab active:cursor-grabbing">
+            <TransformComponent wrapperClass="w-full h-full" contentClass="w-full h-full">
+              <div className="w-full h-full min-h-[500px] flex items-center justify-center p-10 cursor-grab active:cursor-grabbing">
                  {erroRender ? (
-                     <div className="text-red-400 text-center p-4 border border-red-900/50 rounded bg-red-900/20">
-                         <p className="font-bold">Não foi possível desenhar este mapa.</p>
-                         <p className="text-xs mt-2 opacity-70">O código gerado pela IA contém erros de sintaxe.</p>
-                         <pre className="text-left text-[10px] mt-4 bg-black p-2 rounded overflow-auto max-w-sm">{chart}</pre>
+                     <div className="text-red-400 text-center p-4">
+                         <p>Erro ao desenhar mapa.</p>
                      </div>
                  ) : (
-                     <div ref={elementRef} className="mermaid-container" />
+                     <div ref={elementRef} className="mermaid-container w-full h-full flex items-center justify-center" />
                  )}
               </div>
             </TransformComponent>

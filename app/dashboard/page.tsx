@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from "next/navigation";
-// REMOVIDO: import Image from "next/image"; (Causava o erro de bloqueio)
+// Usamos img normal para evitar bloqueios, então sem next/image
 import mermaid from "mermaid";
 import PptxGenJS from "pptxgenjs"; 
 import jsPDF from "jspdf";         
@@ -15,7 +15,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// --- INTERFACES ---
+// --- INTERFACES (Tipagem para evitar erros vermelhos) ---
 interface Usuario {
   id: string;
   email?: string;
@@ -123,6 +123,7 @@ export default function Dashboard() {
   
   // --- ESTADOS DE LEITURA (MEUS ARQUIVOS) ---
   const [arquivoLeitura, setArquivoLeitura] = useState<HistoricoItem | null>(null);
+  const [gerandoExtra, setGerandoExtra] = useState(false); // NOVO ESTADO PARA O BOTÃO "GERAR MAIS"
 
   // --- ESTADOS DOS FLASHCARDS ---
   const [flashcards, setFlashcards] = useState<Flashcard[]>([]); 
@@ -301,6 +302,7 @@ export default function Dashboard() {
       }, 1000);
       return () => clearInterval(timer);
   }, [usuario, stats.segundosEstudados, salvarProgressoNoBanco]);
+
   const formatarTempo = (segundos: number) => {
       const h = Math.floor(segundos / 3600);
       const m = Math.floor((segundos % 3600) / 60);
@@ -417,7 +419,7 @@ export default function Dashboard() {
   };
 
   // --- LÓGICA DOS FLASHCARDS ---
-  const abrirDeckFlashcards = (deck: Flashcard[]) => {
+  const abrirDeckFlashcards = (deck: any[]) => {
       setFlashcards(deck); setCardIndex(0); setCardVirado(false); setFimFlashcards(false); setModoJogoAtivo(true);
   };
   const virarCarta = () => setCardVirado(!cardVirado);
@@ -485,6 +487,73 @@ export default function Dashboard() {
           alert("Erro ao atualizar foto. Verifique se criou o bucket 'avatars' como PUBLICO no Supabase.");
       } finally {
           setUploadingFoto(false);
+      }
+  };
+
+  // --- NOVA FUNÇÃO MÁGICA: REUTILIZAR ARQUIVO ---
+  const reutilizarArquivo = async (servico: string) => {
+      if (!arquivoLeitura) return;
+      
+      setGerandoExtra(true);
+      // Feedback visual simples
+      const oldTitle = document.title;
+      document.title = "Gerando... ⏳";
+
+      try {
+          // Usa o resumo já existente como "texto"
+          const textoParaReuso = arquivoLeitura.resumo.replace(/<[^>]*>?/gm, ''); // Tira tags HTML básicas para limpar
+
+          const response = await fetch('/api/processar', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  textoExistente: textoParaReuso, // Envia texto direto
+                  servicos: [servico],
+                  configQuestao: configQuestao
+              })
+          });
+
+          const dadosIA: DadosIA = await response.json();
+          if (dadosIA.error) throw new Error(dadosIA.error);
+
+          // Atualiza o registro no banco com os novos dados
+          const updates: any = {};
+          if (servico === 'flashcards') updates.flashcards_data = dadosIA.flashcards;
+          if (servico === 'mapa') updates.mermaid = dadosIA.mermaid;
+          
+          if (Object.keys(updates).length > 0) {
+              const { error } = await supabase
+                  .from('historicos')
+                  .update(updates)
+                  .eq('id', arquivoLeitura.id);
+              
+              if (error) throw error;
+              
+              // Atualiza estado local
+              setArquivoLeitura(prev => prev ? ({ ...prev, ...updates }) : null);
+              
+              // Atualiza lista do histórico
+              setHistorico(prev => prev.map(item => item.id === arquivoLeitura.id ? { ...item, ...updates } : item));
+          }
+
+          // Redireciona
+          if (servico === 'flashcards') { setMenuAtivo("flashcards"); abrirDeckFlashcards(dadosIA.flashcards); }
+          else if (servico === 'mapa') { setMenuAtivo("mapas"); }
+          else if (servico === 'questoes' && dadosIA.questoes) {
+             let textoChat = `🤖 **Novas Questões Geradas:**\n\n`;
+             dadosIA.questoes.forEach((q: Questao, i: number) => { textoChat += `**${i+1}. ${q.enunciado}**\n${q.alternativas ? q.alternativas.map((a: string) => `• ${a}`).join('\n') : ''}\n\n`; });
+             setChatMensagens(prev => [...prev, { role: "assistant", content: textoChat }]); setMenuAtivo("tutor_ia");
+          }
+          else if (servico === 'podcast' && dadosIA.audio_base64) {
+             const novoPod = { id: Date.now(), titulo: "Podcast: " + arquivoLeitura.title, duracao: "01:00", data: "Agora", url: dadosIA.audio_base64 };
+             setMeusPodcasts([novoPod, ...meusPodcasts]); setMenuAtivo("podcasts");
+          }
+
+      } catch (e: any) {
+          alert("Erro ao gerar: " + e.message);
+      } finally {
+          setGerandoExtra(false);
+          document.title = oldTitle;
       }
   };
 
@@ -1012,6 +1081,18 @@ export default function Dashboard() {
                             <button onClick={() => setArquivoLeitura(null)} className="text-slate-400 hover:text-white">← Voltar</button>
                             <h2 className="text-xl font-bold truncate">{arquivoLeitura.title}</h2>
                         </div>
+                        
+                        {/* --- ÁREA DE GERAÇÃO EXTRA (BOTÕES PARA REUTILIZAR) --- */}
+                        <div className="mb-6 p-4 bg-blue-900/10 border border-blue-500/20 rounded-xl">
+                            <h4 className="text-sm font-bold text-blue-300 mb-3 flex items-center gap-2">✨ Gerar novos materiais a partir deste arquivo:</h4>
+                            <div className="flex gap-2 overflow-x-auto pb-2">
+                                <button onClick={() => reutilizarArquivo('flashcards')} disabled={gerandoExtra} className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition flex-shrink-0 border border-slate-700">{gerandoExtra ? '...' : '🃏 Flashcards'}</button>
+                                <button onClick={() => reutilizarArquivo('questoes')} disabled={gerandoExtra} className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition flex-shrink-0 border border-slate-700">{gerandoExtra ? '...' : '❓ Questões'}</button>
+                                <button onClick={() => reutilizarArquivo('mapa')} disabled={gerandoExtra} className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition flex-shrink-0 border border-slate-700">{gerandoExtra ? '...' : '🧠 Mapa Mental'}</button>
+                                <button onClick={() => reutilizarArquivo('podcast')} disabled={gerandoExtra} className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition flex-shrink-0 border border-slate-700">{gerandoExtra ? '...' : '🎧 Podcast'}</button>
+                            </div>
+                        </div>
+
                         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 overflow-y-auto custom-scrollbar flex-1">
                              <h3 className="text-blue-400 font-bold mb-4 uppercase text-sm tracking-wider">Resumo Gerado</h3>
                              <div className="prose prose-invert prose-lg max-w-none text-slate-300" dangerouslySetInnerHTML={{ __html: arquivoLeitura.resumo || "<p>Conteúdo não disponível em texto.</p>" }} />
