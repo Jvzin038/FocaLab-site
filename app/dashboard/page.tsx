@@ -315,6 +315,26 @@ export default function Dashboard() {
     if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
   }, [chatMensagens, menuAtivo]);
 
+  // --- BARRA DE FERRAMENTAS (O VISUAL DOS BOTÕES) ---
+  const BarraDeFerramentas = () => {
+      if (!arquivoLeitura) return null;
+      return (
+        <div className="mb-4 p-3 bg-blue-900/10 border border-blue-500/20 rounded-xl animate-in fade-in">
+            <div className="flex justify-between items-center mb-2">
+                <span className="text-[10px] font-bold text-blue-300 uppercase tracking-wider flex items-center gap-2">
+                    📂 Arquivo Atual: {arquivoLeitura.title.substring(0, 30)}...
+                </span>
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                <button onClick={() => reutilizarArquivo('flashcards')} disabled={gerandoExtra} className="bg-slate-800 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition flex-shrink-0 border border-slate-700 flex items-center gap-2">🃏 Flashcards</button>
+                <button onClick={() => reutilizarArquivo('questoes')} disabled={gerandoExtra} className="bg-slate-800 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition flex-shrink-0 border border-slate-700 flex items-center gap-2">❓ Questões</button>
+                <button onClick={() => reutilizarArquivo('mapa')} disabled={gerandoExtra} className="bg-slate-800 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition flex-shrink-0 border border-slate-700 flex items-center gap-2">🧠 Mapa Mental</button>
+                <button onClick={() => reutilizarArquivo('podcast')} disabled={gerandoExtra} className="bg-slate-800 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition flex-shrink-0 border border-slate-700 flex items-center gap-2">🎧 Podcast</button>
+            </div>
+        </div>
+      );
+  };
+
   // --- LÓGICA DO CHAT TUTOR IA (INTEGRADO COM RAG) ---
   const enviarMensagemChat = async () => {
     if (!chatInput.trim()) return;
@@ -962,6 +982,8 @@ export default function Dashboard() {
                     <button onClick={() => setMenuAtivo("inicio")} className="text-slate-400 hover:text-white">Fechar</button>
                 </div>
 
+                <BarraDeFerramentas />
+
                 <div className="grid md:grid-cols-2 gap-8 h-full overflow-hidden">
                     {/* ESQUERDA: O ROTEIRO GERADO DO ARQUIVO */}
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 overflow-y-auto custom-scrollbar flex flex-col">
@@ -1024,6 +1046,7 @@ export default function Dashboard() {
                 </span>
               )}
             </div>
+<BarraDeFerramentas />
 
             <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-6 overflow-y-auto mb-4 custom-scrollbar flex flex-col gap-4" ref={chatScrollRef}>
               {chatMensagens.map((msg, idx) => (
@@ -1138,7 +1161,7 @@ export default function Dashboard() {
                                 <h4 className="font-bold text-white text-lg">{item.title}</h4>
                                 <span className="text-xs text-slate-500">Arraste para mover • Scroll para zoom</span>
                             </div>
-                            
+                            <BarraDeFerramentas />
                             {/* AQUI ENTRA O NOVO COMPONENTE DE MAPA */}
                             <div className="flex-1 border border-slate-700 rounded-xl overflow-hidden shadow-2xl">
                                 <MapaMentalViewer chart={item.mermaid!} />
@@ -1175,6 +1198,7 @@ export default function Dashboard() {
                     <div className="max-w-4xl mx-auto flex flex-col items-center">
                         <div className="w-full flex justify-between items-center mb-6">
                             <button onClick={sairDoJogoFlashcards} className="text-slate-400 hover:text-white flex items-center gap-2">← Voltar para Estante</button>
+                           <BarraDeFerramentas />
                             <span className="text-orange-400 font-bold">Carta {cardIndex + 1} / {flashcards.length}</span>
                         </div>
                         {!fimFlashcards ? (
