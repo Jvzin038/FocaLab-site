@@ -315,6 +315,116 @@ export default function Dashboard() {
     if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
   }, [chatMensagens, menuAtivo]);
 
+  // =========================================================
+  // === LÓGICA DA FOTO DE PERFIL (STORAGE) =================
+  // =========================================================
+  const acionarInputFoto = () => fileInputRef.current?.click();
+  
+  const trocarFotoLocalmente = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !usuario) return;
+
+      setUploadingFoto(true);
+
+      try {
+          const fileExt = file.name.split('.').pop();
+          const fileName = `${usuario.id}/${Date.now()}.${fileExt}`;
+          const filePath = `${fileName}`;
+
+          const { error: uploadError } = await supabase.storage
+              .from('avatars')
+              .upload(filePath, file);
+
+          if (uploadError) throw uploadError;
+
+          const { data: { publicUrl } } = supabase.storage
+              .from('avatars')
+              .getPublicUrl(filePath);
+
+          const { error: updateError } = await supabase.auth.updateUser({
+              data: { avatar_url: publicUrl }
+          });
+
+          if (updateError) throw updateError;
+
+          setFotoPreview(publicUrl);
+          alert("Foto de perfil atualizada com sucesso!");
+
+      } catch (error: unknown) {
+          console.error("Erro ao subir foto:", error);
+          alert("Erro ao atualizar foto. Verifique se criou o bucket 'avatars' como PUBLICO no Supabase.");
+      } finally {
+          setUploadingFoto(false);
+      }
+  };
+
+  // --- NOVA FUNÇÃO MÁGICA: REUTILIZAR ARQUIVO ---
+  const reutilizarArquivo = async (servico: string) => {
+      if (!arquivoLeitura) return;
+      
+      setGerandoExtra(true);
+      // Feedback visual simples
+      const oldTitle = document.title;
+      document.title = "Gerando... ⏳";
+
+      try {
+          // Usa o resumo já existente como "texto"
+          const textoParaReuso = arquivoLeitura.resumo.replace(/<[^>]*>?/gm, ''); // Tira tags HTML básicas para limpar
+
+          const response = await fetch('/api/processar', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  textoExistente: textoParaReuso, // Envia texto direto
+                  servicos: [servico],
+                  configQuestao: configQuestao
+              })
+          });
+
+          const dadosIA: DadosIA = await response.json();
+          if (dadosIA.error) throw new Error(dadosIA.error);
+
+          // Atualiza o registro no banco com os novos dados
+          const updates: any = {};
+          if (servico === 'flashcards') updates.flashcards_data = dadosIA.flashcards;
+          if (servico === 'mapa') updates.mermaid = dadosIA.mermaid;
+          
+          if (Object.keys(updates).length > 0) {
+              const { error } = await supabase
+                  .from('historicos')
+                  .update(updates)
+                  .eq('id', arquivoLeitura.id);
+              
+              if (error) throw error;
+              
+              // Atualiza estado local
+              setArquivoLeitura(prev => prev ? ({ ...prev, ...updates }) : null);
+              
+              // Atualiza lista do histórico
+              setHistorico(prev => prev.map(item => item.id === arquivoLeitura.id ? { ...item, ...updates } : item));
+          }
+
+          // Redireciona
+          if (servico === 'flashcards') { setMenuAtivo("flashcards"); abrirDeckFlashcards(dadosIA.flashcards); }
+          else if (servico === 'mapa') { setMenuAtivo("mapas"); }
+          else if (servico === 'questoes' && dadosIA.questoes) {
+             let textoChat = `🤖 **Novas Questões Geradas:**\n\n`;
+             dadosIA.questoes.forEach((q: Questao, i: number) => { textoChat += `**${i+1}. ${q.enunciado}**\n${q.alternativas ? q.alternativas.map((a: string) => `• ${a}`).join('\n') : ''}\n\n`; });
+             setChatMensagens(prev => [...prev, { role: "assistant", content: textoChat }]); setMenuAtivo("tutor_ia");
+          }
+          else if (servico === 'podcast' && dadosIA.audio_base64) {
+             const novoPod = { id: Date.now(), titulo: "Podcast: " + arquivoLeitura.title, duracao: "01:00", data: "Agora", url: dadosIA.audio_base64 };
+             setMeusPodcasts([novoPod, ...meusPodcasts]); setMenuAtivo("podcasts");
+          }
+
+      } catch (e: any) {
+          alert("Erro ao gerar: " + e.message);
+      } finally {
+          setGerandoExtra(false);
+          document.title = oldTitle;
+      }
+  };
+
   // --- BARRA DE FERRAMENTAS (O VISUAL DOS BOTÕES) ---
   const BarraDeFerramentas = () => {
       if (!arquivoLeitura) return null;
@@ -465,116 +575,6 @@ export default function Dashboard() {
   };
   const toggleServico = (id: string) => {
     if (servicosSelecionados.includes(id)) setServicosSelecionados(servicosSelecionados.filter(item => item !== id)); else setServicosSelecionados([...servicosSelecionados, id]);
-  };
-
-  // =========================================================
-  // === LÓGICA DA FOTO DE PERFIL (STORAGE) =================
-  // =========================================================
-  const acionarInputFoto = () => fileInputRef.current?.click();
-  
-  const trocarFotoLocalmente = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file || !usuario) return;
-
-      setUploadingFoto(true);
-
-      try {
-          const fileExt = file.name.split('.').pop();
-          const fileName = `${usuario.id}/${Date.now()}.${fileExt}`;
-          const filePath = `${fileName}`;
-
-          const { error: uploadError } = await supabase.storage
-              .from('avatars')
-              .upload(filePath, file);
-
-          if (uploadError) throw uploadError;
-
-          const { data: { publicUrl } } = supabase.storage
-              .from('avatars')
-              .getPublicUrl(filePath);
-
-          const { error: updateError } = await supabase.auth.updateUser({
-              data: { avatar_url: publicUrl }
-          });
-
-          if (updateError) throw updateError;
-
-          setFotoPreview(publicUrl);
-          alert("Foto de perfil atualizada com sucesso!");
-
-      } catch (error: unknown) {
-          console.error("Erro ao subir foto:", error);
-          alert("Erro ao atualizar foto. Verifique se criou o bucket 'avatars' como PUBLICO no Supabase.");
-      } finally {
-          setUploadingFoto(false);
-      }
-  };
-
-  // --- NOVA FUNÇÃO MÁGICA: REUTILIZAR ARQUIVO ---
-  const reutilizarArquivo = async (servico: string) => {
-      if (!arquivoLeitura) return;
-      
-      setGerandoExtra(true);
-      // Feedback visual simples
-      const oldTitle = document.title;
-      document.title = "Gerando... ⏳";
-
-      try {
-          // Usa o resumo já existente como "texto"
-          const textoParaReuso = arquivoLeitura.resumo.replace(/<[^>]*>?/gm, ''); // Tira tags HTML básicas para limpar
-
-          const response = await fetch('/api/processar', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                  textoExistente: textoParaReuso, // Envia texto direto
-                  servicos: [servico],
-                  configQuestao: configQuestao
-              })
-          });
-
-          const dadosIA: DadosIA = await response.json();
-          if (dadosIA.error) throw new Error(dadosIA.error);
-
-          // Atualiza o registro no banco com os novos dados
-          const updates: any = {};
-          if (servico === 'flashcards') updates.flashcards_data = dadosIA.flashcards;
-          if (servico === 'mapa') updates.mermaid = dadosIA.mermaid;
-          
-          if (Object.keys(updates).length > 0) {
-              const { error } = await supabase
-                  .from('historicos')
-                  .update(updates)
-                  .eq('id', arquivoLeitura.id);
-              
-              if (error) throw error;
-              
-              // Atualiza estado local
-              setArquivoLeitura(prev => prev ? ({ ...prev, ...updates }) : null);
-              
-              // Atualiza lista do histórico
-              setHistorico(prev => prev.map(item => item.id === arquivoLeitura.id ? { ...item, ...updates } : item));
-          }
-
-          // Redireciona
-          if (servico === 'flashcards') { setMenuAtivo("flashcards"); abrirDeckFlashcards(dadosIA.flashcards); }
-          else if (servico === 'mapa') { setMenuAtivo("mapas"); }
-          else if (servico === 'questoes' && dadosIA.questoes) {
-             let textoChat = `🤖 **Novas Questões Geradas:**\n\n`;
-             dadosIA.questoes.forEach((q: Questao, i: number) => { textoChat += `**${i+1}. ${q.enunciado}**\n${q.alternativas ? q.alternativas.map((a: string) => `• ${a}`).join('\n') : ''}\n\n`; });
-             setChatMensagens(prev => [...prev, { role: "assistant", content: textoChat }]); setMenuAtivo("tutor_ia");
-          }
-          else if (servico === 'podcast' && dadosIA.audio_base64) {
-             const novoPod = { id: Date.now(), titulo: "Podcast: " + arquivoLeitura.title, duracao: "01:00", data: "Agora", url: dadosIA.audio_base64 };
-             setMeusPodcasts([novoPod, ...meusPodcasts]); setMenuAtivo("podcasts");
-          }
-
-      } catch (e: any) {
-          alert("Erro ao gerar: " + e.message);
-      } finally {
-          setGerandoExtra(false);
-          document.title = oldTitle;
-      }
   };
 
   // =========================================================
@@ -943,7 +943,7 @@ export default function Dashboard() {
                        <h4 className="text-slate-300 font-bold mb-4">O que você quer gerar?</h4>
                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
                            {/* --- OPÇÃO NOVA DE APRESENTAÇÃO --- */}
-                           <ServicoCard icon="🖥️" titulo={<span translate="no">Apresentação</span>} desc="Roteiro + Normas ABNT." selecionado={servicosSelecionados.includes("apresentacao")} onClick={() => toggleServico("apresentacao")} />
+                           <ServicoCard icon="🖥️" titulo={<span translate="no">Apresentação</span>} desc="Roteiro + Slides" selecionado={servicosSelecionados.includes("apresentacao")} onClick={() => toggleServico("apresentacao")} />
                            
                            <ServicoCard icon="📝" titulo="Resumo" desc="Vai para 'Meus Arquivos'." selecionado={servicosSelecionados.includes("resumo")} onClick={() => toggleServico("resumo")} />
                            <ServicoCard icon="🧠" titulo="Mapa Mental" desc="Vai para 'Galeria'." selecionado={servicosSelecionados.includes("mapa")} onClick={() => toggleServico("mapa")} />
@@ -970,7 +970,6 @@ export default function Dashboard() {
           </div>
         );
 
-      // --- TELA DE APRESENTAÇÃO MODIFICADA (SEM SIMULAÇÃO DE TEMA) ---
       case "apresentacao":
         return (
             <div className="animate-in fade-in slide-in-from-right-10 duration-500 h-full flex flex-col pb-20">
@@ -1046,7 +1045,8 @@ export default function Dashboard() {
                 </span>
               )}
             </div>
-<BarraDeFerramentas />
+
+            <BarraDeFerramentas />
 
             <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-6 overflow-y-auto mb-4 custom-scrollbar flex flex-col gap-4" ref={chatScrollRef}>
               {chatMensagens.map((msg, idx) => (
@@ -1105,16 +1105,7 @@ export default function Dashboard() {
                             <h2 className="text-xl font-bold truncate">{arquivoLeitura.title}</h2>
                         </div>
                         
-                        {/* --- ÁREA DE GERAÇÃO EXTRA (BOTÕES PARA REUTILIZAR) --- */}
-                        <div className="mb-6 p-4 bg-blue-900/10 border border-blue-500/20 rounded-xl">
-                            <h4 className="text-sm font-bold text-blue-300 mb-3 flex items-center gap-2">✨ Gerar novos materiais a partir deste arquivo:</h4>
-                            <div className="flex gap-2 overflow-x-auto pb-2">
-                                <button onClick={() => reutilizarArquivo('flashcards')} disabled={gerandoExtra} className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition flex-shrink-0 border border-slate-700">{gerandoExtra ? '...' : '🃏 Flashcards'}</button>
-                                <button onClick={() => reutilizarArquivo('questoes')} disabled={gerandoExtra} className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition flex-shrink-0 border border-slate-700">{gerandoExtra ? '...' : '❓ Questões'}</button>
-                                <button onClick={() => reutilizarArquivo('mapa')} disabled={gerandoExtra} className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition flex-shrink-0 border border-slate-700">{gerandoExtra ? '...' : '🧠 Mapa Mental'}</button>
-                                <button onClick={() => reutilizarArquivo('podcast')} disabled={gerandoExtra} className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition flex-shrink-0 border border-slate-700">{gerandoExtra ? '...' : '🎧 Podcast'}</button>
-                            </div>
-                        </div>
+                        <BarraDeFerramentas />
 
                         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 overflow-y-auto custom-scrollbar flex-1">
                              <h3 className="text-blue-400 font-bold mb-4 uppercase text-sm tracking-wider">Resumo Gerado</h3>
@@ -1146,6 +1137,8 @@ export default function Dashboard() {
           <div className="animate-in fade-in slide-in-from-right-10 duration-500 pb-20 h-[calc(100vh-100px)] flex flex-col">
             <h2 className="text-2xl font-bold mb-4">Galeria de Mapas Mentais 🧠</h2>
             
+            <BarraDeFerramentas />
+            
             {historico.filter(i => i.mermaid).length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-slate-500">
                    <div className="text-6xl mb-4">🗺️</div>
@@ -1154,14 +1147,15 @@ export default function Dashboard() {
                 </div>
             ) : (
                 <div className="grid gap-8 h-full">
-                    {/* Renderiza apenas os mapas que tem código mermaid */}
                     {historico.filter(i => i.mermaid).map((item) => (
                         <div key={item.id} className="flex flex-col h-[600px]"> 
                             <div className="flex justify-between items-center mb-2 px-2">
                                 <h4 className="font-bold text-white text-lg">{item.title}</h4>
-                                <span className="text-xs text-slate-500">Arraste para mover • Scroll para zoom</span>
+                                <button onClick={() => setArquivoLeitura(item)} className="text-xs text-blue-400 hover:underline border border-blue-500/30 px-2 py-1 rounded bg-blue-900/20">
+                                    Selecionar para Gerar Mais
+                                </button>
                             </div>
-                            <BarraDeFerramentas />
+                            
                             {/* AQUI ENTRA O NOVO COMPONENTE DE MAPA */}
                             <div className="flex-1 border border-slate-700 rounded-xl overflow-hidden shadow-2xl">
                                 <MapaMentalViewer chart={item.mermaid!} />
@@ -1198,9 +1192,11 @@ export default function Dashboard() {
                     <div className="max-w-4xl mx-auto flex flex-col items-center">
                         <div className="w-full flex justify-between items-center mb-6">
                             <button onClick={sairDoJogoFlashcards} className="text-slate-400 hover:text-white flex items-center gap-2">← Voltar para Estante</button>
-                           <BarraDeFerramentas />
                             <span className="text-orange-400 font-bold">Carta {cardIndex + 1} / {flashcards.length}</span>
                         </div>
+
+                        <BarraDeFerramentas />
+
                         {!fimFlashcards ? (
                            <div className="w-full max-w-lg perspective-1000">
                                <div onClick={virarCarta} className={`relative w-full aspect-[16/9] cursor-pointer transition-all duration-500 transform-style-3d ${cardVirado ? "rotate-y-180" : ""}`} style={{ transformStyle: 'preserve-3d', transform: cardVirado ? 'rotateY(180deg)' : 'rotateY(0deg)', transition: 'transform 0.6s' }}>
