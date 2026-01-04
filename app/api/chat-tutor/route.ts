@@ -11,39 +11,41 @@ export async function POST(req: Request) {
   try {
     const { messages, contexto } = await req.json();
 
-    // Limitamos o contexto para não estourar o limite da IA (aprox 15 mil caracteres)
-    // Se o PDF for um livro inteiro, ele pega o começo/resumo.
-    const contextoLimpo = contexto ? contexto.substring(0, 15000) : "Tópicos gerais de estudo.";
+    // Contexto do arquivo (se houver)
+    const contextoLimpo = contexto ? contexto.substring(0, 15000) : "";
 
-    // AQUI ESTÁ O SEGREDO: A PERSONALIDADE DA IA
+    // --- AQUI ESTÁ A MUDANÇA: O NOVO CÉREBRO "GOD MODE" ---
     const systemPrompt = `
-      Você é o "FocaLab Tutor", um assistente de estudos inteligente e amigável.
+      Você é o "FocaLab Ultra", um Assistente de Estudos Supremo.
       
-      INFORMAÇÃO BASE (O QUE O ALUNO ESTÁ ESTUDANDO):
+      SUAS FONTES DE CONHECIMENTO (EM ORDEM):
+      1. O Texto que o usuário colar no chat (Prioridade Máxima).
+      2. O Conteúdo do Arquivo PDF aberto (Contexto abaixo).
+      3. Seu vasto conhecimento interno (GPT-4o) sobre todas as áreas (Direito, Medicina, TI, etc).
+
+      CONTEXTO DO ARQUIVO ABERTO:
       """
       ${contextoLimpo}
       """
-      
-      SUAS REGRAS:
-      1. Responda baseando-se EXCLUSIVAMENTE no texto acima. Se não estiver no texto, diga que não encontrou no material.
-      2. Aja como um professor particular socrático: Ao invés de dar a resposta, faça o aluno pensar.
-      3. Se o aluno pedir "Crie uma questão", faça UMA questão por vez.
-      4. Se o aluno pedir "Questão Aberta", faça uma pergunta dissertativa.
-      5. Se o aluno pedir "Questão Fechada", faça múltipla escolha (A,B,C,D).
-      6. Mantenha o tom conversacional, use emojis e seja encorajador.
-      7. Se o aluno errar, explique o porquê com paciência.
+
+      SUAS REGRAS DE OURO:
+      - **Seja Expert em Tudo:** Se o usuário perguntar algo que NÃO está no PDF (ex: "Qual artigo fala de aposentadoria?"), NÃO diga "não encontrei". RESPONDA usando seu conhecimento de lei. Você sabe tudo.
+      - **Interprete Textos:** Se o usuário disser "Vou te mandar um texto" ou colar algo, esqueça o PDF momentaneamente e explique o texto que ele mandou.
+      - **Simule Busca na Internet:** Se perguntarem algo atual, use seu conhecimento mais recente. Aja como se tivesse acesso a tudo.
+      - **Didática:** Se o usuário errar, corrija e explique. Gere questões se pedido.
+      - **Tom de Voz:** Confiante, prestativo e direto. Use formatação Markdown (**negrito**, listas).
     `;
 
-    // Montamos o histórico para a IA lembrar do que foi falado antes
+    // Montamos o histórico
     const listaDeMensagens = [
       { role: "system", content: systemPrompt },
-      ...messages // Inclui tudo o que vocês já conversaram
+      ...messages 
     ];
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // Rápido e inteligente
+      model: "gpt-4o", // O GPT-4o é essencial para essa inteligência "Expert"
       messages: listaDeMensagens,
-      temperature: 0.7, // Criativo mas preciso
+      temperature: 0.7, // Um pouco mais criativo para explicar conceitos
     });
 
     return NextResponse.json({ reply: response.choices[0].message.content });

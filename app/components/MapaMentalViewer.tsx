@@ -12,37 +12,58 @@ interface MapaProps {
 export default function MapaMentalViewer({ chart }: MapaProps) {
   const elementRef = useRef<HTMLDivElement>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const [erroRender, setErroRender] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
-    // CONFIGURAÇÃO DE CORES VIBRANTES AQUI
-    mermaid.initialize({ 
-      startOnLoad: false, 
-      theme: 'base',
-      themeVariables: {
-        primaryColor: '#2563eb', // Azul forte
-        primaryTextColor: '#ffffff',
-        primaryBorderColor: '#60a5fa',
-        lineColor: '#f59e0b', // Linhas laranjas
-        secondaryColor: '#db2777', // Rosa para sub-tópicos
-        tertiaryColor: '#4f46e5' // Roxo
-      },
-      fontFamily: 'sans-serif'
-    });
     
-    setTimeout(() => {
-      try {
-        mermaid.contentLoaded();
-      } catch (e) { console.error("Erro render mermaid", e); }
-    }, 200);
-  }, [chart]);
+    // Configuração de cores vibrantes
+    mermaid.initialize({ 
+      startOnLoad: true,
+      theme: 'base',
+      securityLevel: 'loose',
+      themeVariables: {
+        primaryColor: '#1e3a8a', // Azul escuro
+        primaryTextColor: '#fff',
+        primaryBorderColor: '#60a5fa',
+        lineColor: '#f59e0b', // Laranja
+        secondaryColor: '#db2777',
+        tertiaryColor: '#4f46e5'
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (isMounted && chart) {
+        const renderMap = async () => {
+            try {
+                // Limpa o código para evitar quebras
+                const cleanChart = chart.replace(/"/g, "'"); 
+                
+                // Força a renderização
+                const { svg } = await mermaid.render('mermaid-svg-' + Date.now(), cleanChart);
+                if (elementRef.current) {
+                    elementRef.current.innerHTML = svg;
+                    setErroRender(false);
+                }
+            } catch (e) {
+                console.error("Erro Mermaid:", e);
+                setErroRender(true);
+            }
+        };
+        renderMap();
+    }
+  }, [chart, isMounted]);
 
   const downloadImage = async () => {
     if (elementRef.current === null) return;
-    const node = elementRef.current.querySelector('.mermaid') as HTMLElement;
-    if (!node) return;
     try {
-      const dataUrl = await toPng(node, { backgroundColor: '#0f172a', quality: 2.0 });
+      // Pega o SVG gerado
+      const svgElement = elementRef.current.querySelector('svg');
+      if (!svgElement) return;
+
+      // Converte para PNG com fundo escuro
+      const dataUrl = await toPng(elementRef.current, { backgroundColor: '#0f172a', quality: 1.0, pixelRatio: 3 });
       const link = document.createElement('a');
       link.download = 'mapa-focalab.png';
       link.href = dataUrl;
@@ -50,12 +71,12 @@ export default function MapaMentalViewer({ chart }: MapaProps) {
     } catch (err) { alert('Erro ao baixar imagem.'); }
   };
 
-  if (!isMounted) return <div className="text-slate-500 text-center p-4">Carregando mapa...</div>;
+  if (!isMounted) return <div className="text-slate-500 text-center p-4">Carregando visualizador...</div>;
 
   return (
     <div className="flex flex-col h-full bg-slate-900 rounded-xl border border-slate-800 overflow-hidden relative group">
       <div className="absolute top-2 right-2 z-20">
-         <button onClick={downloadImage} className="bg-blue-600 text-white px-3 py-1 rounded shadow text-xs font-bold">📸 Baixar</button>
+         <button onClick={downloadImage} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded shadow text-xs font-bold transition flex items-center gap-1">📸 Baixar Imagem</button>
       </div>
 
       <TransformWrapper initialScale={0.8} minScale={0.2} maxScale={4} centerOnInit={true}>
@@ -68,11 +89,16 @@ export default function MapaMentalViewer({ chart }: MapaProps) {
             </div>
 
             <TransformComponent wrapperClass="w-full h-full" contentClass="w-full h-full flex items-center justify-center">
-              {/* REMOVI O MIN-WIDTH FIXO PARA CABER NO CELULAR */}
-              <div ref={elementRef} className="w-full h-full flex items-center justify-center p-4">
-                 <div className="mermaid text-center">
-                   {chart}
-                 </div>
+              <div className="w-full h-full flex items-center justify-center p-4 cursor-grab active:cursor-grabbing">
+                 {erroRender ? (
+                     <div className="text-red-400 text-center p-4 border border-red-900/50 rounded bg-red-900/20">
+                         <p className="font-bold">Não foi possível desenhar este mapa.</p>
+                         <p className="text-xs mt-2 opacity-70">O código gerado pela IA contém erros de sintaxe.</p>
+                         <pre className="text-left text-[10px] mt-4 bg-black p-2 rounded overflow-auto max-w-sm">{chart}</pre>
+                     </div>
+                 ) : (
+                     <div ref={elementRef} className="mermaid-container" />
+                 )}
               </div>
             </TransformComponent>
           </>

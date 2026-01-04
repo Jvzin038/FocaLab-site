@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
-// CORREÇÃO: Caminho relativo para garantir que encontre o arquivo na pasta lib
 import { extrairTextoDoBuffer } from '../../../lib/extrator';
 
 export const dynamic = 'force-dynamic';
@@ -34,55 +33,55 @@ export async function POST(req: Request) {
         const base64Limpo = fileBase64.replace(/^data:.*;base64,/, "").replace(/[\s\n\r]/g, "");
         try {
             const buffer = Buffer.from(base64Limpo, 'base64');
-            // CORREÇÃO: Enviamos APENAS o buffer (1 argumento)
             conteudoParaIA = await extrairTextoDoBuffer(buffer);
         } catch (e) {
-            console.error("Erro ao converter base64:", e);
-            return NextResponse.json({ error: "O arquivo está corrompido ou ilegível." }, { status: 400 });
+            console.error("Erro extrator:", e);
+            return NextResponse.json({ error: "Erro ao ler arquivo." }, { status: 400 });
         }
     }
 
-    // --- PROMPT DINÂMICO ---
+    // --- PROMPT DINÂMICO (TURBINADO) ---
     let instrucoesSistema = `
-      Você é o "FocaLab IA", um tutor especialista.
-      Analise o texto e gere o JSON solicitado.
+      Você é o "FocaLab IA", especialista didático.
+      Analise o conteúdo e gere o JSON solicitado.
       Responda em Português do Brasil.
     `;
 
     if (servicos.includes('flashcards')) {
-      instrucoesSistema += `\n[FLASHCARDS]: Crie 10 flashcards. JSON: "flashcards": [{ "pergunta": "...", "resposta": "..." }]`;
+      instrucoesSistema += `\n[FLASHCARDS]: Crie 10 flashcards (pergunta/resposta) curtos e diretos. JSON: "flashcards": [{"pergunta": "...", "resposta": "..."}]`;
     }
 
+    // --- AQUI ESTÁ A MÁGICA DO MAPA MENTAL ---
     if (servicos.includes('mapa')) {
-      instrucoesSistema += `\n[MAPA MENTAL]: Use sintaxe Mermaid "graph TD". Use colchetes [] para temas e parenteses () para subtemas. JSON: "mermaid": "graph TD; A[Tema]-->B(Sub)..."`;
+      instrucoesSistema += `
+        \n[MAPA MENTAL]:
+        - Crie um código Mermaid.js "graph TD".
+        - OBRIGATÓRIO: Use formas diferentes para hierarquia:
+          1. Raiz: id((TEXTO)) (Círculo Duplo)
+          2. Principais: id{TEXTO} (Losango)
+          3. Detalhes: id[TEXTO] (Retângulo)
+        - REGRA CRÍTICA: NÃO use parênteses (), colchetes [] ou aspas " DENTRO dos textos dos nós, pois quebra o código.
+        - Exemplo: A((Anatomia)) --> B{Ossos} --> C[Fêmur]
+        - JSON: "mermaid": "graph TD; A((Tema))..."
+      `;
     }
 
     if (servicos.includes('questoes')) {
       const tipo = configQuestao?.tipo || 'mista';
       const nivel = configQuestao?.dificuldade || 'medio';
-      instrucoesSistema += `\n[QUESTÕES]: 5 questões nível ${nivel}, estilo ${tipo}. JSON: "questoes": [{ "enunciado": "...", "alternativas": ["A..", "B.."], "correta": 0, "explicacao": "..." }]`;
+      instrucoesSistema += `\n[QUESTÕES]: 5 questões nível ${nivel} do tipo ${tipo}. JSON: "questoes": [{"enunciado": "...", "alternativas": ["A)", "B)"], "correta": 0, "explicacao": "..."}]`;
     }
 
-    if (servicos.includes('resumo')) instrucoesSistema += `\n[RESUMO]: "resumo": "Texto em HTML (<p>, <b>)."`;
+    if (servicos.includes('resumo')) instrucoesSistema += `\n[RESUMO]: "resumo": "HTML rico com <p>, <b>, <ul>, <li>."`;
     if (servicos.includes('apresentacao')) instrucoesSistema += `\n[APRESENTAÇÃO]: "roteiro_estruturado": { "introducao": "...", "desenvolvimento": "...", "conclusao": "..." }, "referencia_abnt_arquivo": "..."`;
     if (servicos.includes('podcast')) instrucoesSistema += `\n[PODCAST]: "podcast_script": "Roteiro falado..."`;
 
-    // --- CHAMADA OPENAI ---
-    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [{ role: "system", content: instrucoesSistema }];
+    const messages: any[] = [{ role: "system", content: instrucoesSistema }];
 
     if (ehImagem) {
-       messages.push({
-         role: "user",
-         content: [
-           { type: "text", text: "Analise esta imagem acadêmica e gere o JSON." },
-           { type: "image_url", image_url: { url: fileBase64 } } 
-         ]
-       });
+       messages.push({ role: "user", content: [{ type: "text", text: "Analise a imagem e gere o JSON." }, { type: "image_url", image_url: { url: fileBase64 } }] });
     } else {
-       if (!conteudoParaIA || conteudoParaIA.length < 50) {
-           return NextResponse.json({ error: "Texto insuficiente no arquivo." }, { status: 400 });
-       }
-       messages.push({ role: "user", content: `Analise este texto:\n\n"${conteudoParaIA.substring(0, 25000)}"` });
+       messages.push({ role: "user", content: `Analise este texto (extraia conceitos chave):\n\n"${conteudoParaIA.substring(0, 20000)}"` });
     }
 
     const completion = await openai.chat.completions.create({
@@ -94,12 +93,10 @@ export async function POST(req: Request) {
 
     const dadosProcessados = JSON.parse(completion.choices[0].message.content || "{}");
 
-    // --- GERAR AUDIO ---
+    // Audio Podcast
     if (servicos.includes('podcast') && dadosProcessados.podcast_script) {
         try {
-            const mp3 = await openai.audio.speech.create({
-                model: "tts-1", voice: "alloy", input: dadosProcessados.podcast_script.substring(0, 4000),
-            });
+            const mp3 = await openai.audio.speech.create({ model: "tts-1", voice: "alloy", input: dadosProcessados.podcast_script.substring(0, 4000) });
             const buffer = Buffer.from(await mp3.arrayBuffer());
             dadosProcessados.audio_base64 = "data:audio/mp3;base64," + buffer.toString('base64');
         } catch (e) { console.error("Erro audio", e); }
@@ -107,9 +104,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json(dadosProcessados);
 
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error('❌ ERRO:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-    return NextResponse.json({ error: 'Erro no servidor: ' + errorMessage }, { status: 500 });
+    return NextResponse.json({ error: 'Erro no servidor.' }, { status: 500 });
   }
 }

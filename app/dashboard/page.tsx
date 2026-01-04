@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from "next/navigation";
-import Image from "next/image";
+// REMOVIDO: import Image from "next/image"; (Causava o erro de bloqueio)
 import mermaid from "mermaid";
 import PptxGenJS from "pptxgenjs"; 
 import jsPDF from "jspdf";         
@@ -1192,7 +1192,7 @@ export default function Dashboard() {
                     <div className="flex items-center gap-6 mb-8 pb-8 border-b border-slate-800">
                         <div className="h-24 w-24 rounded-full flex items-center justify-center text-4xl font-bold text-white border-4 border-slate-950 shadow-lg overflow-hidden bg-gradient-to-br from-blue-600 to-purple-600 relative">
                             {/* --- MOSTRA A FOTO CARREGADA OU A INICIAL --- */}
-                            {fotoPreview ? <Image src={fotoPreview} alt="Foto de perfil" fill className="object-cover" /> : usuario?.email?.charAt(0).toUpperCase()}
+                            {fotoPreview ? <img src={fotoPreview} alt="Avatar" className="w-full h-full object-cover" /> : usuario?.email?.charAt(0).toUpperCase()}
                             {uploadingFoto && <div className="absolute inset-0 bg-black/50 flex items-center justify-center"><div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></div></div>}
                         </div>
                         <div>
@@ -1300,7 +1300,7 @@ export default function Dashboard() {
                   onClick={() => setMenuPerfilAberto(!menuPerfilAberto)} 
                   className="h-10 w-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center font-bold text-white shadow-lg border-2 border-slate-900 cursor-pointer overflow-hidden"
                 >
-                  {fotoPreview ? <Image src={fotoPreview} alt="Avatar" fill className="object-cover" /> : usuario?.email?.charAt(0).toUpperCase()}
+                  {fotoPreview ? <img src={fotoPreview} alt="Avatar" className="w-full h-full object-cover" /> : usuario?.email?.charAt(0).toUpperCase()}
                 </button>
                 
                 {menuPerfilAberto && (
